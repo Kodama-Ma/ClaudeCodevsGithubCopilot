@@ -100,25 +100,14 @@ function getMyContext_() {
   return { email, isAdmin, depts };
 }
 
-/** 画面初期化用データ */
-function getBootstrap() {
-  const ctx = getMyContext_();
-  if (!ctx.email) {
-    return { error: 'ログインユーザーを取得できませんでした（ドメイン内アカウントでアクセスしてください）。' };
-  }
-  if (ctx.depts.length === 0) {
-    return { error: 'あなたの担当部が roles シートに登録されていません。管理者に連絡してください。', email: ctx.email };
-  }
-
-  const org = readSheet_(SHEETS.ORG).rows;
+/** 指定した部のメンバーを Organization 基準で join して返す（ライセンス未設定は配布なし） */
+function buildPeople_(depts) {
   const licMap = {};
   readSheet_(SHEETS.LICENSES).rows.forEach(r => {
     if (r['github-id']) licMap[r['github-id']] = r;
   });
-
-  // Organization を基準に join。権限内の部だけ。ライセンス未設定でも「配布なし」で出す。
-  const people = org
-    .filter(o => ctx.depts.indexOf(o['部']) !== -1)
+  return readSheet_(SHEETS.ORG).rows
+    .filter(o => depts.indexOf(o['部']) !== -1)
     .map(o => {
       const lic = licMap[o['github-id']] || {};
       return {
@@ -130,17 +119,82 @@ function getBootstrap() {
         'プラン': lic['プラン'] || ''
       };
     });
+}
+
+/** ツール×プラン -> 月額単価 のマップ */
+function priceMap_() {
+  const map = {};
+  readSheet_(SHEETS.PRICES).rows.forEach(p => {
+    map[p['ツール'] + '||' + p['プラン']] = Number(p['月額単価']) || 0;
+  });
+  return map;
+}
+
+/** 画面初期化用データ */
+function getBootstrap() {
+  const ctx = getMyContext_();
+  if (!ctx.email) {
+    return { error: 'ログインユーザーを取得できませんでした（ドメイン内アカウントでアクセスしてください）。' };
+  }
+  if (ctx.depts.length === 0) {
+    return { error: 'あなたの担当部が roles シートに登録されていません。管理者に連絡してください。', email: ctx.email };
+  }
 
   const result = {
     email: ctx.email,
     isAdmin: ctx.isAdmin,
     depts: ctx.depts,
-    people: people,
+    people: buildPeople_(ctx.depts),
     prices: readSheet_(SHEETS.PRICES).rows
   };
 
-  if (ctx.isAdmin) result.warnings = reconcileWithGithub_(org, readSheet_(SHEETS.LICENSES).rows);
+  if (ctx.isAdmin) {
+    result.warnings = reconcileWithGithub_(readSheet_(SHEETS.ORG).rows, readSheet_(SHEETS.LICENSES).rows);
+  }
   return result;
+}
+
+/**
+ * 指定スコープ（'All' または 部名）のデータを、押した人のGoogleドライブに
+ * 新規スプレッドシートとして書き出す。月額費用も列に含める。
+ * 権限内の部しか出力できない。
+ */
+function exportToDrive(scope) {
+  const ctx = getMyContext_();
+  let depts;
+  if (scope === 'All') {
+    depts = ctx.depts;
+  } else {
+    if (ctx.depts.indexOf(scope) === -1) throw new Error('権限がありません: ' + scope);
+    depts = [scope];
+  }
+
+  const prices = priceMap_();
+  const people = buildPeople_(depts);
+  const headers = ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン', '月額'];
+  const rows = people.map(r => {
+    const cost = (r['ツール'] && r['ツール'] !== NO_TOOL) ? (prices[r['ツール'] + '||' + r['プラン']] || 0) : 0;
+    return [r['github-id'], r['部'], r['グループ'], r['氏名'], r['ツール'], r['プラン'], cost];
+  });
+
+  const label = scope === 'All' ? '全体' : scope;
+  const stamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmm');
+  const ss = SpreadsheetApp.create('ライセンス_' + label + '_' + stamp);
+  const sh = ss.getSheets()[0];
+  sh.setName(label);
+  const out = [headers].concat(rows);
+  sh.getRange(1, 1, out.length, headers.length).setValues(out);
+
+  // 押した人のドライブに置く（同ドメインならオーナー移譲、無理なら編集者として共有）
+  const file = DriveApp.getFileById(ss.getId());
+  try {
+    file.setOwner(ctx.email);
+  } catch (e) {
+    file.addEditor(ctx.email);
+  }
+
+  appendLog_(ctx.email, label, 'エクスポート: ' + ss.getName());
+  return { url: ss.getUrl(), title: ss.getName() };
 }
 
 /**
