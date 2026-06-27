@@ -43,6 +43,18 @@ function getSpreadsheet_() {
   return SpreadsheetApp.openById(id);
 }
 
+// ▼ エクスポート先（固定）スプシのIDを EXPORT_SPREADSHEET_ID に設定する。
+//   閲覧してほしい人にだけ共有しておく専用スプシを1枚用意し、そのIDを渡す。
+function setExportSpreadsheetId(id) {
+  PropertiesService.getScriptProperties().setProperty('EXPORT_SPREADSHEET_ID', id);
+}
+
+function getExportSpreadsheet_() {
+  const id = PropertiesService.getScriptProperties().getProperty('EXPORT_SPREADSHEET_ID');
+  if (!id) throw new Error('EXPORT_SPREADSHEET_ID が未設定です。setExportSpreadsheetId("...") を一度実行してください。');
+  return SpreadsheetApp.openById(id);
+}
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('AIツール ライセンス管理')
@@ -155,46 +167,38 @@ function getBootstrap() {
 }
 
 /**
- * 指定スコープ（'All' または 部名）のデータを、押した人のGoogleドライブに
- * 新規スプレッドシートとして書き出す。月額費用も列に含める。
- * 権限内の部しか出力できない。
+ * 全体（自分が見える全部署）の「全メンバー一覧」を、固定のエクスポート先スプシに上書き出力する。
+ * 新規作成はしない。「メンバー一覧」シートを毎回まるごと書き換える。金額は出さない。
+ * 戻り値の url を開けば最新のスプシに行ける（＝アプリ⇔スプシを行き来できるだけ）。
  */
-function exportToDrive(scope) {
+function exportAll() {
   const ctx = getMyContext_();
-  let depts;
-  if (scope === 'All') {
-    depts = ctx.depts;
-  } else {
-    if (ctx.depts.indexOf(scope) === -1) throw new Error('権限がありません: ' + scope);
-    depts = [scope];
-  }
+  const depts = ctx.depts;
+  if (!depts || depts.length === 0) throw new Error('出力できる部がありません。');
 
-  const prices = priceMap_();
   const people = buildPeople_(depts);
-  const headers = ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン', '月額'];
-  const rows = people.map(r => {
-    const cost = (r['ツール'] && r['ツール'] !== NO_TOOL) ? (prices[r['ツール'] + '||' + r['プラン']] || 0) : 0;
-    return [r['github-id'], r['部'], r['グループ'], r['氏名'], r['ツール'], r['プラン'], cost];
-  });
+  const headers = ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン'];
+  const rows = people.map(r => [r['github-id'], r['部'], r['グループ'], r['氏名'], r['ツール'], r['プラン']]);
 
-  const label = scope === 'All' ? '全体' : scope;
-  const stamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmm');
-  const ss = SpreadsheetApp.create('ライセンス_' + label + '_' + stamp);
-  const sh = ss.getSheets()[0];
-  sh.setName(label);
+  const ss = getExportSpreadsheet_();
+  writeSheet_(ss, 'メンバー一覧', headers, rows);
+
+  const stamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
+  ss.getSheetByName('メンバー一覧').getRange(rows.length + 3, 1)
+    .setValue('最終更新: ' + stamp + ' / ' + ctx.email);
+
+  appendLog_(ctx.email, 'All', 'エクスポート（メンバー一覧を更新）');
+  return { url: ss.getUrl(), title: ss.getName() };
+}
+
+/** 指定シートを毎回まるごと書き換える（無ければ作る） */
+function writeSheet_(ss, name, headers, rows) {
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  sh.clear();
   const out = [headers].concat(rows);
   sh.getRange(1, 1, out.length, headers.length).setValues(out);
-
-  // 押した人のドライブに置く（同ドメインならオーナー移譲、無理なら編集者として共有）
-  const file = DriveApp.getFileById(ss.getId());
-  try {
-    file.setOwner(ctx.email);
-  } catch (e) {
-    file.addEditor(ctx.email);
-  }
-
-  appendLog_(ctx.email, label, 'エクスポート: ' + ss.getName());
-  return { url: ss.getUrl(), title: ss.getName() };
+  sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
 }
 
 /**
