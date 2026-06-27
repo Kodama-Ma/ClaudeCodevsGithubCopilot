@@ -1,0 +1,6 @@
+{
+  "//": "clasp create 実行後に .clasp.json が生成される。これはその雛形。",
+  "//scriptId": "clasp create で発行される Apps Script のスクリプトIDに置き換える",
+  "scriptId": "<YOUR_SCRIPT_ID>",
+  "rootDir": "."
+}
