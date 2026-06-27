@@ -26,12 +26,7 @@ GAS（Google Apps Script）Webアプリ。clasp でローカル開発＋git管�
 
 ### 1. スプレッドシートを用意
 
-新規スプシを作り、4シートを作成。`seeds/` のCSVをそのまま貼り付けると初期データになる。
-
-- `licenses` … `seeds/licenses.csv`
-- `pricing`  … `seeds/pricing.csv`（費用の単価表。金額はダミーなので実額に直す）
-- `roles`    … `seeds/roles.csv`（**メールを実際の部長/管理者のアドレスに置換**。事業部=ALLが管理者）
-- `log`      … ヘッダー行だけ：`日時, 操作者, 事業部, 内容`
+新規スプシを作るだけでOK（シートは後で `initSheets()` が自動で作ってくれる）。
 
 スプシURLの `/d/<ここ>/edit` が **スプレッドシートID**。
 
@@ -45,13 +40,18 @@ clasp create --type webapp --title "ライセンス管理"   # .clasp.json が�
 clasp push                                             # Code.gs / Index.html を反映
 ```
 
-### 3. スプシIDを設定
+### 3. スプシIDを設定・初期データ投入
 
-Apps Scriptエディタで一度だけ実行（またはプロジェクト設定→スクリプトプロパティに `SPREADSHEET_ID`）：
+Apps Scriptエディタで以下を順番に実行（各関数を選択して▶ボタン）：
 
-```javascript
-setSpreadsheetId('＜スプレッドシートID＞')
 ```
+① setSpreadsheetId('＜スプレッドシートID＞')   // スプシIDを登録
+② initSheets()                                  // 4シートを自動作成＆初期データ投入
+```
+
+`initSheets()` が licenses / pricing / roles / log の4シートをまとめて作ってくれる。
+完了ダイアログが出たら、**roles シートのメールアドレスを実際の部長・管理者アドレスに書き換える**。
+pricing の月額単価も実際の金額に直す。
 
 ### 4. デプロイ
 
