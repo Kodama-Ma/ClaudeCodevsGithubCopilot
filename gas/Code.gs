@@ -37,10 +37,14 @@ function setSpreadsheetId(id) {
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', id);
 }
 
+// 1リクエスト内ではスプシのオープンを1回だけに（openById は重いのでメモ化）
+let _ssCache = null;
 function getSpreadsheet_() {
+  if (_ssCache) return _ssCache;
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new Error('SPREADSHEET_ID が未設定です。setSpreadsheetId("...") を一度実行してください。');
-  return SpreadsheetApp.openById(id);
+  _ssCache = SpreadsheetApp.openById(id);
+  return _ssCache;
 }
 
 // ▼ エクスポート先（固定）スプシのIDを EXPORT_SPREADSHEET_ID に設定する。
@@ -61,15 +65,22 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+// 1リクエスト内では同じシートの読み込みを1回だけに（getBootstrap は同じシートを複数回読むため）
+const _sheetCache = {};
+function invalidateSheetCache_(name) {
+  if (name) delete _sheetCache[name]; else for (const k in _sheetCache) delete _sheetCache[k];
+}
+
 /** シートを {header, rows(objects)} で読む。シートが無ければ rows:[] */
 function readSheet_(name, optional) {
+  if (Object.prototype.hasOwnProperty.call(_sheetCache, name)) return _sheetCache[name];
   const sh = getSpreadsheet_().getSheetByName(name);
   if (!sh) {
-    if (optional) return { header: [], rows: [] };
+    if (optional) return (_sheetCache[name] = { header: [], rows: [] });
     throw new Error('シートが見つかりません: ' + name);
   }
   const values = sh.getDataRange().getValues();
-  if (values.length === 0) return { header: [], rows: [] };
+  if (values.length === 0) return (_sheetCache[name] = { header: [], rows: [] });
   const header = values.shift().map(String);
   const rows = values
     .filter(r => r.some(c => String(c).trim() !== ''))
@@ -78,7 +89,7 @@ function readSheet_(name, optional) {
       header.forEach((h, i) => (o[h] = r[i] === undefined ? '' : String(r[i]).trim()));
       return o;
     });
-  return { header, rows };
+  return (_sheetCache[name] = { header, rows });
 }
 
 /** Organization を github-id -> {部, グループ, 氏名} のマップで返す */
@@ -260,6 +271,7 @@ function saveDept(dept, rows) {
     const out = [LICENSE_HEADERS].concat(merged.map(r => LICENSE_HEADERS.map(h => r[h] || '')));
     sh.clearContents();
     sh.getRange(1, 1, out.length, LICENSE_HEADERS.length).setValues(out);
+    invalidateSheetCache_(SHEETS.LICENSES);
 
     appendLog_(ctx.email, dept, dept + ' のライセンスを更新（付与 ' + incoming.length + ' 件）');
     return { ok: true, count: incoming.length };
