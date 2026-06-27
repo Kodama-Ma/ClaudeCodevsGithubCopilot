@@ -1,25 +1,41 @@
 /**
  * AIツール ライセンス管理 Webアプリ（GAS）
  *
- * データはマスタースプシ1枚に集約し、権限はアプリ側で出し分ける。
- * - 部長: 自部署の行だけ閲覧・編集
- * - 管理者: 全部署を閲覧・編集、費用集計を見られる
+ * 人事項目（部・グループ・氏名）は Organization シートで一元管理し、
+ * licenses は「誰に・どのツール・どのプラン」だけを持つ。
+ * 画面表示時に github-id をキーに Organization と join する。
  *
  * シート構成:
- *   licenses : Github-id, 事業部, グループ, 氏名, ツール, プラン
- *   pricing  : ツール, プラン, 月額単価
- *   roles    : メール, 事業部   （事業部=ALL で管理者）
- *   log      : 日時, 操作者, 事業部, 内容   （自動追記される）
+ *   Organization     : github-id, 部, グループ, 氏名   （人と所属のマスタ。ここでメンテ）
+ *   licenses         : github-id, ツール, プラン        （ライセンス付与のみ）
+ *   prices           : ツール, プラン, 月額単価
+ *   roles            : メール, 部                       （部=ALL で管理者）
+ *   log              : 日時, 操作者, 部, 内容           （自動追記）
+ *   github_licenses  : github-id                        （GitHub Enterprise Cloud 出力CSVを貼る。突合用）
+ *
+ * 部のタブは Organization の「部」を読んで動的生成する。
  */
 
+const SHEETS = {
+  ORG: 'Organization',
+  LICENSES: 'licenses',
+  PRICES: 'prices',
+  ROLES: 'roles',
+  LOG: 'log',
+  GH_CSV: 'github_licenses'
+};
+
+const ORG_HEADERS = ['github-id', '部', 'グループ', '氏名'];
+const LICENSE_HEADERS = ['github-id', 'ツール', 'プラン'];
+const PRICE_HEADERS = ['ツール', 'プラン', '月額単価'];
+const ROLE_HEADERS = ['メール', '部'];
+const LOG_HEADERS = ['日時', '操作者', '部', '内容'];
+const NO_TOOL = '配布なし';
+
 // ▼ デプロイ前に、対象スプシのIDをスクリプトプロパティ SPREADSHEET_ID に設定する。
-//    （拡張機能→Apps Script→プロジェクト設定→スクリプトプロパティ、または下の初期化関数）
 function setSpreadsheetId(id) {
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', id);
 }
-
-const SHEETS = { LICENSES: 'licenses', PRICING: 'pricing', ROLES: 'roles', LOG: 'log' };
-const LICENSE_HEADERS = ['Github-id', '事業部', 'グループ', '氏名', 'ツール', 'プラン'];
 
 function getSpreadsheet_() {
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
@@ -33,91 +49,162 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/** シートを {header, rows(objects)} で読む */
-function readSheet_(name) {
+/** シートを {header, rows(objects)} で読む。シートが無ければ rows:[] */
+function readSheet_(name, optional) {
   const sh = getSpreadsheet_().getSheetByName(name);
-  if (!sh) throw new Error('シートが見つかりません: ' + name);
+  if (!sh) {
+    if (optional) return { header: [], rows: [] };
+    throw new Error('シートが見つかりません: ' + name);
+  }
   const values = sh.getDataRange().getValues();
+  if (values.length === 0) return { header: [], rows: [] };
   const header = values.shift().map(String);
   const rows = values
     .filter(r => r.some(c => String(c).trim() !== ''))
     .map(r => {
       const o = {};
-      header.forEach((h, i) => (o[h] = r[i] === undefined ? '' : String(r[i])));
+      header.forEach((h, i) => (o[h] = r[i] === undefined ? '' : String(r[i]).trim()));
       return o;
     });
   return { header, rows };
 }
 
-/** ログイン中ユーザーの権限コンテキストを返す */
+/** Organization を github-id -> {部, グループ, 氏名} のマップで返す */
+function orgById_() {
+  const map = {};
+  readSheet_(SHEETS.ORG).rows.forEach(r => {
+    if (r['github-id']) map[r['github-id']] = r;
+  });
+  return map;
+}
+
+/** Organization に出てくる部を出現順でユニーク化 */
+function deptsInOrder_() {
+  const seen = [];
+  readSheet_(SHEETS.ORG).rows.forEach(r => {
+    const d = r['部'];
+    if (d && seen.indexOf(d) === -1) seen.push(d);
+  });
+  return seen;
+}
+
+/** ログイン中ユーザーの権限コンテキスト */
 function getMyContext_() {
   const email = Session.getActiveUser().getEmail();
-  const { rows } = readSheet_(SHEETS.ROLES);
-  const mine = rows.filter(r => (r['メール'] || '').toLowerCase() === email.toLowerCase());
-  const isAdmin = mine.some(r => (r['事業部'] || '').toUpperCase() === 'ALL');
-  const depts = isAdmin
-    ? [...new Set(readSheet_(SHEETS.LICENSES).rows.map(r => r['事業部']).filter(Boolean))]
-    : mine.map(r => r['事業部']).filter(Boolean);
+  const roles = readSheet_(SHEETS.ROLES).rows;
+  const mine = roles.filter(r => (r['メール'] || '').toLowerCase() === email.toLowerCase());
+  const isAdmin = mine.some(r => (r['部'] || '').toUpperCase() === 'ALL');
+  const allDepts = deptsInOrder_();
+  const myDeptNames = mine.map(r => r['部']).filter(Boolean);
+  const depts = isAdmin ? allDepts : allDepts.filter(d => myDeptNames.indexOf(d) !== -1);
   return { email, isAdmin, depts };
 }
 
-/** 画面初期化用データ（権限でフィルタ済みのライセンス＋費用表＋自分の権限） */
+/** 画面初期化用データ */
 function getBootstrap() {
   const ctx = getMyContext_();
   if (!ctx.email) {
     return { error: 'ログインユーザーを取得できませんでした（ドメイン内アカウントでアクセスしてください）。' };
   }
   if (ctx.depts.length === 0) {
-    return { error: 'あなたの編集対象事業部が roles シートに登録されていません。管理者に連絡してください。', email: ctx.email };
+    return { error: 'あなたの担当部が roles シートに登録されていません。管理者に連絡してください。', email: ctx.email };
   }
-  const licenses = readSheet_(SHEETS.LICENSES).rows.filter(r => ctx.depts.includes(r['事業部']));
-  const pricing = readSheet_(SHEETS.PRICING).rows;
-  return {
+
+  const org = readSheet_(SHEETS.ORG).rows;
+  const licMap = {};
+  readSheet_(SHEETS.LICENSES).rows.forEach(r => {
+    if (r['github-id']) licMap[r['github-id']] = r;
+  });
+
+  // Organization を基準に join。権限内の部だけ。ライセンス未設定でも「配布なし」で出す。
+  const people = org
+    .filter(o => ctx.depts.indexOf(o['部']) !== -1)
+    .map(o => {
+      const lic = licMap[o['github-id']] || {};
+      return {
+        'github-id': o['github-id'],
+        '部': o['部'],
+        'グループ': o['グループ'],
+        '氏名': o['氏名'],
+        'ツール': lic['ツール'] || NO_TOOL,
+        'プラン': lic['プラン'] || ''
+      };
+    });
+
+  const result = {
     email: ctx.email,
     isAdmin: ctx.isAdmin,
     depts: ctx.depts,
-    headers: LICENSE_HEADERS,
-    licenses: licenses,
-    pricing: pricing
+    people: people,
+    prices: readSheet_(SHEETS.PRICES).rows
   };
+
+  if (ctx.isAdmin) result.warnings = reconcileWithGithub_(org, readSheet_(SHEETS.LICENSES).rows);
+  return result;
 }
 
 /**
- * 1事業部ぶんの行を保存する。
- * 権限チェック → その事業部の既存行を置き換え → log 追記。
- * rows: [{Github-id, 事業部, グループ, 氏名, ツール, プラン}, ...]
+ * GitHub Enterprise Cloud 出力CSV（github_licenses シート）と突合し、要確認リストを返す。
+ * - unregistered : CSVにいるが Organization 未登録（＝アプリに登録すべき人）
+ * - leftover     : ライセンス付与済みなのに CSV にいない（＝退職・剥奪漏れの疑い）
+ */
+function reconcileWithGithub_(org, licenses) {
+  const csv = readSheet_(SHEETS.GH_CSV, true).rows;
+  if (csv.length === 0) return { unregistered: [], leftover: [], csvLoaded: false };
+
+  const csvIds = new Set(csv.map(r => r['github-id']).filter(Boolean));
+  const orgIds = new Set(org.map(r => r['github-id']).filter(Boolean));
+
+  const unregistered = [...csvIds].filter(id => !orgIds.has(id));
+  const leftover = licenses
+    .filter(r => r['ツール'] && r['ツール'] !== NO_TOOL)
+    .map(r => r['github-id'])
+    .filter(id => id && !csvIds.has(id));
+
+  return { unregistered, leftover, csvLoaded: true };
+}
+
+/**
+ * 1部ぶんのライセンスを保存する。
+ * 権限チェック → その部のメンバー（Organization由来）の付与だけを licenses に反映 → log 追記。
+ * rows: [{github-id, ツール, プラン}, ...]
  */
 function saveDept(dept, rows) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const ctx = getMyContext_();
-    if (!ctx.depts.includes(dept)) {
+    if (ctx.depts.indexOf(dept) === -1) {
       throw new Error('権限がありません: ' + dept + ' を編集できるのは担当者のみです。');
     }
-    // 渡された行の事業部を強制的に dept に揃える（なりすまし防止）
-    const clean = (rows || [])
-      .filter(r => String(r['Github-id'] || '').trim() !== '')
-      .map(r => {
-        const o = { '事業部': dept };
-        LICENSE_HEADERS.forEach(h => { if (h !== '事業部') o[h] = String(r[h] || '').trim(); });
-        return o;
-      });
+
+    // その部に本当に所属する github-id だけを受理（なりすまし防止）
+    const org = orgById_();
+    const deptIds = new Set(
+      Object.keys(org).filter(id => org[id]['部'] === dept)
+    );
+
+    const incoming = (rows || [])
+      .filter(r => deptIds.has(r['github-id']))
+      .filter(r => r['ツール'] && r['ツール'] !== NO_TOOL)  // 配布なしは licenses に残さない
+      .map(r => ({
+        'github-id': r['github-id'],
+        'ツール': String(r['ツール']).trim(),
+        'プラン': String(r['プラン'] || '').trim()
+      }));
+
+    // 既存 licenses から この部のメンバー分を除去 → incoming を追加
+    const all = readSheet_(SHEETS.LICENSES).rows;
+    const others = all.filter(r => !deptIds.has(r['github-id']));
+    const merged = others.concat(incoming);
 
     const sh = getSpreadsheet_().getSheetByName(SHEETS.LICENSES);
-    const all = readSheet_(SHEETS.LICENSES).rows;
-    const others = all.filter(r => r['事業部'] !== dept);
-    const merged = others.concat(clean);
-
-    // シートを書き直す（ヘッダー＋全行）
-    const out = [LICENSE_HEADERS].concat(
-      merged.map(r => LICENSE_HEADERS.map(h => r[h] || ''))
-    );
+    const out = [LICENSE_HEADERS].concat(merged.map(r => LICENSE_HEADERS.map(h => r[h] || '')));
     sh.clearContents();
     sh.getRange(1, 1, out.length, LICENSE_HEADERS.length).setValues(out);
 
-    appendLog_(ctx.email, dept, dept + ' を ' + clean.length + ' 行で更新');
-    return { ok: true, count: clean.length };
+    appendLog_(ctx.email, dept, dept + ' のライセンスを更新（付与 ' + incoming.length + ' 件）');
+    return { ok: true, count: incoming.length };
   } finally {
     lock.releaseLock();
   }
@@ -130,32 +217,39 @@ function appendLog_(email, dept, message) {
 }
 
 /**
- * スプシの4シートを seeds データで初期化する。
+ * スプシの各シートを seeds データで初期化する。
  *
  * 使い方:
- *   1. setSpreadsheetId('...') でスプシIDを設定済みであること
- *   2. GASエディタ上部の「関数を選択」で initSheets を選び▶実行
- *   3. 既存データは上書きされる（やり直しも可）
- *
- * seeds に相当するデータをコード内に直書きしているので、
- * 実運用では roles の「メール」を実際のアドレスに、
- * pricing の「月額単価」を実際の金額に書き換えてから実行する。
+ *   1. setSpreadsheetId('...') 済みであること
+ *   2. initSheets を選び▶実行（既存データは上書きされる）
+ *   3. roles のメールを実アドレスに、prices を実額に、Organization を実データに置換
+ *      github_licenses には GitHub Enterprise Cloud の出力CSVを貼る
  */
 function initSheets() {
   const ss = getSpreadsheet_();
 
   const seeds = {
-    licenses: {
-      headers: ['Github-id', '事業部', 'グループ', '氏名', 'ツール', 'プラン'],
+    Organization: {
+      headers: ORG_HEADERS,
       rows: [
-        ['aaa', '開発1部', '1グループ', 'アルファ', 'ClaudeCode', 'Premium'],
-        ['bbb', '開発1部', '2グループ', 'ベータ',   'ClaudeCode', 'Standard'],
-        ['ccc', '開発2部', '1グループ', 'ラムダ',   'Codex',      'Business'],
-        ['ddd', '開発3部', '1グループ', 'ガンマ',   '配布なし',   ''],
+        ['aaa', '開発1部', '1グループ', 'アルファ'],
+        ['bbb', '開発1部', '2グループ', 'ベータ'],
+        ['eee', '開発1部', '1グループ', 'イプシロン'],  // ライセンス未付与の人（配布なし表示のデモ）
+        ['ccc', '開発2部', '1グループ', 'ラムダ'],
+        ['ddd', '開発3部', '1グループ', 'ガンマ'],
       ]
     },
-    pricing: {
-      headers: ['ツール', 'プラン', '月額単価'],
+    licenses: {
+      headers: LICENSE_HEADERS,
+      rows: [
+        ['aaa', 'ClaudeCode', 'Premium'],
+        ['bbb', 'ClaudeCode', 'Standard'],
+        ['ccc', 'Codex',      'Business'],
+        // ddd, eee は付与なし → licenses に行を持たない（＝配布なし）
+      ]
+    },
+    prices: {
+      headers: PRICE_HEADERS,
       rows: [
         ['ClaudeCode', 'Premium',  3000],
         ['ClaudeCode', 'Standard', 2000],
@@ -163,19 +257,24 @@ function initSheets() {
       ]
     },
     roles: {
-      headers: ['メール', '事業部'],
+      headers: ROLE_HEADERS,
       rows: [
-        // ▼ 実際の部長・管理者メールアドレスに書き換えて initSheets() を実行すること
+        // ▼ 実際の部長・管理者メールアドレスに置換して再実行
         ['dev1-lead@example.com', '開発1部'],
         ['dev2-lead@example.com', '開発2部'],
         ['dev3-lead@example.com', '開発3部'],
         ['admin@example.com',     'ALL'],
       ]
     },
-    log: {
-      headers: ['日時', '操作者', '事業部', '内容'],
-      rows: []
-    }
+    github_licenses: {
+      headers: ['github-id'],
+      rows: [
+        // GitHub Enterprise Cloud の出力CSV相当（在籍・ライセンス対象者）
+        ['aaa'], ['bbb'], ['ccc'], ['ddd'], ['eee'],
+        ['zzz'],  // Organization 未登録 → 「登録漏れ」検出デモ
+      ]
+    },
+    log: { headers: LOG_HEADERS, rows: [] }
   };
 
   Object.entries(seeds).forEach(([name, { headers, rows }]) => {
@@ -186,5 +285,9 @@ function initSheets() {
     sh.getRange(1, 1, data.length, headers.length).setValues(data);
   });
 
-  SpreadsheetApp.getUi().alert('initSheets 完了。roles シートのメールアドレスを実際の値に書き換えてください。');
+  // 旧シート名（事業部時代の pricing）が残っていれば掃除
+  const old = ss.getSheetByName('pricing');
+  if (old && ss.getSheets().length > 1) ss.deleteSheet(old);
+
+  console.log('initSheets 完了。Organization / roles / prices / github_licenses を実データに置き換えてください。');
 }
