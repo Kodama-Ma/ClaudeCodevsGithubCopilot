@@ -1,0 +1,16 @@
+# 各事業部のCSVは、その事業部の部長だけがレビュー承認できる。
+# ブランチ保護で「Require review from Code Owners」を有効にすると、
+# 他部署のファイルを変更するPRはその部署の部長承認なしにマージできなくなる。
+#
+# ※ @devN-lead はサンプルのプレースホルダ。実際の部長のGitHubハンドルに置き換える。
+
+/licenses/dev1.csv  @dev1-lead
+/licenses/dev2.csv  @dev2-lead
+/licenses/dev3.csv  @dev3-lead
+/licenses/dev4.csv  @dev4-lead
+/licenses/dev5.csv  @dev5-lead
+
+# 集計スクリプト・ワークフロー・ドキュメントは管理者のみ
+/scripts/           @Kodama-Ma
+/.github/           @Kodama-Ma
+/docs/              @Kodama-Ma
