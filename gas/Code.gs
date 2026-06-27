@@ -128,3 +128,63 @@ function appendLog_(email, dept, message) {
   if (!sh) return;
   sh.appendRow([new Date(), email, dept, message]);
 }
+
+/**
+ * スプシの4シートを seeds データで初期化する。
+ *
+ * 使い方:
+ *   1. setSpreadsheetId('...') でスプシIDを設定済みであること
+ *   2. GASエディタ上部の「関数を選択」で initSheets を選び▶実行
+ *   3. 既存データは上書きされる（やり直しも可）
+ *
+ * seeds に相当するデータをコード内に直書きしているので、
+ * 実運用では roles の「メール」を実際のアドレスに、
+ * pricing の「月額単価」を実際の金額に書き換えてから実行する。
+ */
+function initSheets() {
+  const ss = getSpreadsheet_();
+
+  const seeds = {
+    licenses: {
+      headers: ['Github-id', '事業部', 'グループ', '氏名', 'ツール', 'プラン'],
+      rows: [
+        ['aaa', '開発1部', '1グループ', 'アルファ', 'ClaudeCode', 'Premium'],
+        ['bbb', '開発1部', '2グループ', 'ベータ',   'ClaudeCode', 'Standard'],
+        ['ccc', '開発2部', '1グループ', 'ラムダ',   'Codex',      'Business'],
+        ['ddd', '開発3部', '1グループ', 'ガンマ',   '配布なし',   ''],
+      ]
+    },
+    pricing: {
+      headers: ['ツール', 'プラン', '月額単価'],
+      rows: [
+        ['ClaudeCode', 'Premium',  3000],
+        ['ClaudeCode', 'Standard', 2000],
+        ['Codex',      'Business', 4000],
+      ]
+    },
+    roles: {
+      headers: ['メール', '事業部'],
+      rows: [
+        // ▼ 実際の部長・管理者メールアドレスに書き換えて initSheets() を実行すること
+        ['dev1-lead@example.com', '開発1部'],
+        ['dev2-lead@example.com', '開発2部'],
+        ['dev3-lead@example.com', '開発3部'],
+        ['admin@example.com',     'ALL'],
+      ]
+    },
+    log: {
+      headers: ['日時', '操作者', '事業部', '内容'],
+      rows: []
+    }
+  };
+
+  Object.entries(seeds).forEach(([name, { headers, rows }]) => {
+    let sh = ss.getSheetByName(name);
+    if (!sh) sh = ss.insertSheet(name);
+    sh.clearContents();
+    const data = [headers, ...rows];
+    sh.getRange(1, 1, data.length, headers.length).setValues(data);
+  });
+
+  SpreadsheetApp.getUi().alert('initSheets 完了。roles シートのメールアドレスを実際の値に書き換えてください。');
+}
