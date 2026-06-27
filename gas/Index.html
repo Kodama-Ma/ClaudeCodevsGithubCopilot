@@ -19,22 +19,24 @@
   table { border-collapse: collapse; width: 100%; background: #fff; }
   th, td { border: 1px solid #d0d7de; padding: 6px 8px; font-size: 13px; text-align: left; }
   th { background: #f0f3f6; }
+  td.ro { color: #57606a; background: #fafbfc; }
   td.cost { text-align: right; font-variant-numeric: tabular-nums; }
-  input, select { font: inherit; padding: 3px 4px; border: 1px solid #d0d7de;
-                  border-radius: 6px; max-width: 160px; }
-  input { width: 120px; }
+  select { font: inherit; padding: 3px 4px; border: 1px solid #d0d7de; border-radius: 6px; max-width: 160px; }
   .bar { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
   .bar .total { font-size: 15px; font-weight: 700; }
   button.act { border: 1px solid #1f2328; background: #1f2328; color: #fff;
                padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
-  button.ghost { border: 1px solid #d0d7de; background: #fff; color: #1f2328;
-                 padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   .msg { margin-left: auto; font-size: 13px; }
   .msg.ok { color: #1a7f37; } .msg.err { color: #cf222e; }
   .summary td.cost { font-weight: 700; }
   .loading, .error { padding: 40px; text-align: center; color: #656d76; }
   .error { color: #cf222e; }
-  .del { color: #cf222e; cursor: pointer; border: none; background: none; font-size: 15px; }
+  .warn { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 8px;
+          padding: 12px 16px; margin-top: 16px; font-size: 13px; }
+  .warn h3 { margin: 0 0 6px; font-size: 14px; }
+  .warn code { background: #fff; border: 1px solid #eac54f; border-radius: 4px; padding: 1px 6px; }
+  .ok-note { color: #1a7f37; font-size: 13px; margin-top: 16px; }
+  .hint { color: #656d76; font-size: 12px; margin: 4px 0 0; }
 </style>
 </head>
 <body>
@@ -47,17 +49,17 @@
 </main>
 
 <script>
-  let DATA = null;        // bootstrap
+  let DATA = null;
   let PRICE = {};         // "ツール||プラン" -> 月額単価(number)
-  let TOOLS = [];         // セレクト用ツール候補
-  let PLANS = [];         // セレクト用プラン候補
+  let TOOLS = [];
+  let PLANS = [];
   const state = {};       // dept -> rows[]
 
   google.script.run.withSuccessHandler(onData).withFailureHandler(onFail).getBootstrap();
 
   function onFail(err) {
-    document.getElementById('root').className = 'error';
-    document.getElementById('root').textContent = 'エラー: ' + err.message;
+    const r = document.getElementById('root');
+    r.className = 'error'; r.textContent = 'エラー: ' + err.message;
   }
 
   function onData(d) {
@@ -70,16 +72,12 @@
     document.getElementById('meta').textContent =
       d.email + (d.isAdmin ? '（管理者）' : '（' + d.depts.join('・') + ' 担当）');
 
-    // 費用表と候補の構築
-    d.pricing.forEach(p => {
-      PRICE[p['ツール'] + '||' + p['プラン']] = Number(p['月額単価']) || 0;
-    });
-    TOOLS = ['配布なし', ...new Set(d.pricing.map(p => p['ツール']).filter(Boolean))];
-    PLANS = ['', ...new Set(d.pricing.map(p => p['プラン']).filter(Boolean))];
+    d.prices.forEach(p => { PRICE[p['ツール'] + '||' + p['プラン']] = Number(p['月額単価']) || 0; });
+    TOOLS = ['配布なし', ...new Set(d.prices.map(p => p['ツール']).filter(Boolean))];
+    PLANS = ['', ...new Set(d.prices.map(p => p['プラン']).filter(Boolean))];
 
     d.depts.forEach(dept => {
-      state[dept] = d.licenses.filter(r => r['事業部'] === dept)
-        .map(r => Object.assign({}, r));
+      state[dept] = d.people.filter(r => r['部'] === dept).map(r => Object.assign({}, r));
     });
 
     render();
@@ -90,14 +88,18 @@
     return PRICE[row['ツール'] + '||' + row['プラン']] || 0;
   }
   function yen(n) { return '¥' + (n || 0).toLocaleString('ja-JP'); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+  function option(value, current) {
+    return '<option value="' + esc(value) + '"' + (value === current ? ' selected' : '') + '>' +
+      (value || '(なし)') + '</option>';
+  }
 
   function render() {
     const root = document.getElementById('root');
-    root.className = '';
-    root.innerHTML = '';
-
-    const tabs = document.createElement('div');
-    tabs.className = 'tabs';
+    root.className = ''; root.innerHTML = '';
+    const tabs = document.createElement('div'); tabs.className = 'tabs';
     const panels = document.createElement('div');
 
     const views = DATA.depts.slice();
@@ -105,8 +107,7 @@
 
     views.forEach((name, i) => {
       const btn = document.createElement('button');
-      btn.textContent = name;
-      btn.className = i === 0 ? 'active' : '';
+      btn.textContent = name; btn.className = i === 0 ? 'active' : '';
       btn.onclick = () => {
         [...tabs.children].forEach(b => b.classList.remove('active'));
         [...panels.children].forEach(p => p.classList.remove('active'));
@@ -125,11 +126,7 @@
 
     root.appendChild(tabs);
     root.appendChild(panels);
-  }
-
-  function option(value, current) {
-    const sel = value === current ? ' selected' : '';
-    return '<option value="' + value + '"' + sel + '>' + (value || '(なし)') + '</option>';
+    DATA.depts.forEach(dept => updateTotal(dept));
   }
 
   function deptView(dept) {
@@ -139,83 +136,61 @@
     renderTable(table, dept);
     wrap.appendChild(table);
 
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    const add = document.createElement('button');
-    add.className = 'ghost'; add.textContent = '＋ 行を追加';
-    add.onclick = () => {
-      state[dept].push({ 'Github-id': '', '事業部': dept, 'グループ': '', '氏名': '', 'ツール': '配布なし', 'プラン': '' });
-      renderTable(table, dept);
-    };
-    const total = document.createElement('span');
-    total.className = 'total'; total.id = 'total-' + dept;
-    const save = document.createElement('button');
-    save.className = 'act'; save.textContent = '保存';
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = '※ github-id・氏名・グループは Organization シートで管理（ここでは編集不可）。メンバーの増減は Organization で行います。';
+    wrap.appendChild(hint);
+
+    const bar = document.createElement('div'); bar.className = 'bar';
+    const total = document.createElement('span'); total.className = 'total'; total.id = 'total-' + dept;
+    const save = document.createElement('button'); save.className = 'act'; save.textContent = '保存';
     const msg = document.createElement('span'); msg.className = 'msg'; msg.id = 'msg-' + dept;
     save.onclick = () => doSave(dept, save, msg);
-
-    bar.appendChild(add);
-    bar.appendChild(total);
-    bar.appendChild(save);
-    bar.appendChild(msg);
+    bar.appendChild(total); bar.appendChild(save); bar.appendChild(msg);
     wrap.appendChild(bar);
-    updateTotal(dept);
     return wrap;
   }
 
   function renderTable(table, dept) {
     const rows = state[dept];
     let html = '<thead><tr>' +
-      ['Github-id', 'グループ', '氏名', 'ツール', 'プラン', '月額', ''].map(h => '<th>' + h + '</th>').join('') +
+      ['github-id', 'グループ', '氏名', 'ツール', 'プラン', '月額'].map(h => '<th>' + h + '</th>').join('') +
       '</tr></thead><tbody>';
+    if (rows.length === 0) {
+      html += '<tr><td colspan="6" class="ro">この部のメンバーが Organization シートにいません。</td></tr>';
+    }
     rows.forEach((r, idx) => {
       html += '<tr>' +
-        '<td><input data-d="' + dept + '" data-i="' + idx + '" data-k="Github-id" value="' + esc(r['Github-id']) + '"></td>' +
-        '<td><input data-d="' + dept + '" data-i="' + idx + '" data-k="グループ" value="' + esc(r['グループ']) + '"></td>' +
-        '<td><input data-d="' + dept + '" data-i="' + idx + '" data-k="氏名" value="' + esc(r['氏名']) + '"></td>' +
-        '<td><select data-d="' + dept + '" data-i="' + idx + '" data-k="ツール">' + TOOLS.map(t => option(t, r['ツール'])).join('') + '</select></td>' +
-        '<td><select data-d="' + dept + '" data-i="' + idx + '" data-k="プラン">' + PLANS.map(p => option(p, r['プラン'])).join('') + '</select></td>' +
-        '<td class="cost" id="cost-' + dept + '-' + idx + '">' + yen(costOf(r)) + '</td>' +
-        '<td><button class="del" title="削除" data-del-d="' + dept + '" data-del-i="' + idx + '">×</button></td>' +
+        '<td class="ro">' + esc(r['github-id']) + '</td>' +
+        '<td class="ro">' + esc(r['グループ']) + '</td>' +
+        '<td class="ro">' + esc(r['氏名']) + '</td>' +
+        '<td><select data-d="' + esc(dept) + '" data-i="' + idx + '" data-k="ツール">' + TOOLS.map(t => option(t, r['ツール'])).join('') + '</select></td>' +
+        '<td><select data-d="' + esc(dept) + '" data-i="' + idx + '" data-k="プラン">' + PLANS.map(p => option(p, r['プラン'])).join('') + '</select></td>' +
+        '<td class="cost" id="cost-' + esc(dept) + '-' + idx + '">' + yen(costOf(r)) + '</td>' +
         '</tr>';
     });
     html += '</tbody>';
     table.innerHTML = html;
-
-    table.querySelectorAll('input, select').forEach(el => {
-      el.addEventListener('input', onEdit);
-    });
-    table.querySelectorAll('.del').forEach(btn => {
-      btn.onclick = () => {
-        state[dept].splice(Number(btn.dataset.delI), 1);
-        renderTable(table, dept);
-        updateTotal(dept);
-      };
-    });
+    table.querySelectorAll('select').forEach(el => el.addEventListener('change', onEdit));
   }
 
   function onEdit(e) {
     const el = e.target;
     const dept = el.dataset.d, i = Number(el.dataset.i), k = el.dataset.k;
     state[dept][i][k] = el.value;
-    if (k === 'ツール' || k === 'プラン') {
-      document.getElementById('cost-' + dept + '-' + i).textContent = yen(costOf(state[dept][i]));
-      updateTotal(dept);
-      refreshSummary();
-    }
+    document.getElementById('cost-' + dept + '-' + i).textContent = yen(costOf(state[dept][i]));
+    updateTotal(dept);
+    refreshSummary();
   }
 
-  function deptTotal(dept) {
-    return state[dept].reduce((s, r) => s + costOf(r), 0);
-  }
+  function deptTotal(dept) { return state[dept].reduce((s, r) => s + costOf(r), 0); }
   function updateTotal(dept) {
     const el = document.getElementById('total-' + dept);
     if (el) el.textContent = dept + ' 月額合計: ' + yen(deptTotal(dept));
   }
 
   function summaryView() {
-    const div = document.createElement('div');
-    div.id = 'summary';
+    const div = document.createElement('div'); div.id = 'summary';
     renderSummary(div);
     return div;
   }
@@ -225,34 +200,50 @@
   }
   function renderSummary(div) {
     let grand = 0;
-    let html = '<table class="summary"><thead><tr><th>事業部</th><th>付与数</th><th>月額</th></tr></thead><tbody>';
+    let html = '<table class="summary"><thead><tr><th>部</th><th>付与数</th><th>月額</th></tr></thead><tbody>';
     DATA.depts.forEach(dept => {
-      const t = deptTotal(dept);
-      grand += t;
+      const t = deptTotal(dept); grand += t;
       const cnt = state[dept].filter(r => r['ツール'] && r['ツール'] !== '配布なし').length;
-      html += '<tr><td>' + dept + '</td><td>' + cnt + '</td><td class="cost">' + yen(t) + '</td></tr>';
+      html += '<tr><td>' + esc(dept) + '</td><td>' + cnt + '</td><td class="cost">' + yen(t) + '</td></tr>';
     });
     html += '<tr><td><b>全社合計</b></td><td></td><td class="cost"><b>' + yen(grand) + '</b></td></tr>';
-    html += '</tbody></table><p style="color:#656d76;font-size:12px">※ 未保存の変更も即時反映されます</p>';
+    html += '</tbody></table><p class="hint">※ 未保存の変更も即時反映されます</p>';
+    html += warningsHtml();
     div.innerHTML = html;
+  }
+
+  function warningsHtml() {
+    const w = DATA.warnings;
+    if (!w) return '';
+    if (!w.csvLoaded) {
+      return '<p class="hint">※ github_licenses シートにGitHub Enterprise CloudのCSVを貼ると、登録漏れ・退職放置の突合が出ます。</p>';
+    }
+    const blocks = [];
+    if (w.unregistered && w.unregistered.length) {
+      blocks.push('<h3>⚠️ GitHubにいるが未登録（Organizationに追加すべき人）</h3>' +
+        w.unregistered.map(id => '<code>' + esc(id) + '</code>').join(' '));
+    }
+    if (w.leftover && w.leftover.length) {
+      blocks.push('<h3>⚠️ ライセンス付与済みだがGitHubにいない（退職・剥奪漏れの疑い）</h3>' +
+        w.leftover.map(id => '<code>' + esc(id) + '</code>').join(' '));
+    }
+    if (blocks.length === 0) {
+      return '<p class="ok-note">✅ GitHub Enterprise の名簿と一致。登録漏れ・放置はありません。</p>';
+    }
+    return '<div class="warn">' + blocks.join('<div style="height:10px"></div>') + '</div>';
   }
 
   function doSave(dept, btn, msg) {
     btn.disabled = true; msg.className = 'msg'; msg.textContent = '保存中…';
     google.script.run
       .withSuccessHandler(res => {
-        btn.disabled = false;
-        msg.className = 'msg ok'; msg.textContent = '保存しました（' + res.count + ' 行）';
+        btn.disabled = false; msg.className = 'msg ok';
+        msg.textContent = '保存しました（付与 ' + res.count + ' 件）';
       })
       .withFailureHandler(err => {
-        btn.disabled = false;
-        msg.className = 'msg err'; msg.textContent = 'エラー: ' + err.message;
+        btn.disabled = false; msg.className = 'msg err'; msg.textContent = 'エラー: ' + err.message;
       })
       .saveDept(dept, state[dept]);
-  }
-
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 </script>
 </body>

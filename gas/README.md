@@ -3,15 +3,33 @@
 スプレッドシート1枚を裏に持ち、**セレクトボックスで編集しながら費用をライブ表示**する
 GAS（Google Apps Script）Webアプリ。clasp でローカル開発＋git管理する構成。
 
+人事項目（部・グループ・氏名）は `Organization` シートで一元管理し、`licenses` は
+「誰に・どのツール・どのプラン」だけを持つ。画面表示時に github-id をキーに join する。
+
 ## 特徴
 
-- 事業部タブ切替。各行を `<select>` でツール/プラン変更 → **月額費用が即時再計算**
-- 管理者は **費用サマリ**タブで部署別・全社合計の月額を一覧
-- 権限はサーバー側で `Session.getActiveUser().getEmail()` を `roles` シートと照合
-  - 部長は自部署のみ編集可。他部署はそもそもアプリに出ない
-  - 保存時に事業部を強制上書きしてなりすましを防止
+- **部タブは `Organization` の「部」から動的生成**。部の増減はシート編集だけで反映
+- 各行を `<select>` でツール/プラン変更 → **月額費用が即時再計算**
+- github-id・氏名・グループは **read-only表示**（`Organization` で一元管理。二重管理しない）
+- 管理者は **費用サマリ**タブで部別・全社合計の月額を一覧
+- **GitHub Enterprise Cloud のCSV（`github_licenses` シート）と突合**し、
+  登録漏れ・退職放置を管理者に警告表示
+- 権限はサーバー側で `Session.getActiveUser().getEmail()` を `roles` と照合
+  - 部長は自部のみ編集可。他部はそもそもアプリに出ない
+  - 保存時に github-id の所属部を `Organization` で再検証してなりすましを防止
 - 変更は `log` シートに自動追記（簡易監査ログ）
 - データは Google Workspace 内に閉じる（外部DB不要）
+
+## シート構成
+
+| シート | 列 | 役割 |
+|--------|-----|------|
+| `Organization` | github-id, 部, グループ, 氏名 | 人と所属のマスタ（ここでメンテ） |
+| `licenses` | github-id, ツール, プラン | ライセンス付与のみ |
+| `prices` | ツール, プラン, 月額単価 | 費用計算の元 |
+| `roles` | メール, 部 | 編集権限（部=ALL で管理者） |
+| `github_licenses` | github-id | GitHub Enterprise Cloud 出力CSVを貼る（突合用） |
+| `log` | 日時, 操作者, 部, 内容 | 変更履歴（自動追記） |
 
 ## ファイル
 
@@ -46,12 +64,15 @@ Apps Scriptエディタで以下を順番に実行（各関数を選択して▶
 
 ```
 ① setSpreadsheetId('＜スプレッドシートID＞')   // スプシIDを登録
-② initSheets()                                  // 4シートを自動作成＆初期データ投入
+② initSheets()                                  // 各シートを自動作成＆初期データ投入
 ```
 
-`initSheets()` が licenses / pricing / roles / log の4シートをまとめて作ってくれる。
-完了ダイアログが出たら、**roles シートのメールアドレスを実際の部長・管理者アドレスに書き換える**。
-pricing の月額単価も実際の金額に直す。
+`initSheets()` が Organization / licenses / prices / roles / github_licenses / log を
+まとめて作ってくれる。完了後、実データに置き換える：
+- **roles** … メールを実際の部長・管理者アドレスに（部=ALL が管理者）
+- **prices** … 月額単価を実額に
+- **Organization** … 部・グループ・氏名・github-id を実データに
+- **github_licenses** … GitHub Enterprise Cloud の出力CSV（github-id列）を貼る
 
 ### 4. デプロイ
 
