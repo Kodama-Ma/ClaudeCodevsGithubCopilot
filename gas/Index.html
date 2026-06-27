@@ -109,8 +109,8 @@
     const tabs = document.createElement('div'); tabs.className = 'tabs';
     const panels = document.createElement('div');
 
-    // 先頭は全体サマリーの「All」タブ、続いて各部のタブ
-    const views = ['All', ...DATA.depts];
+    // 先頭は全メンバー一覧の「All」タブ、各部のタブ、最後に費用サマリータブ
+    const views = ['All', ...DATA.depts, '費用サマリー'];
 
     views.forEach((name, i) => {
       const btn = document.createElement('button');
@@ -128,7 +128,9 @@
       panel.id = 'panel-' + i;
       if (name === 'All') {
         panel.appendChild(exportBar());                  // 書き出しボタンは Allタブだけ
-        panel.appendChild(summaryView());
+        panel.appendChild(membersView());
+      } else if (name === '費用サマリー') {
+        panel.appendChild(costView());
       } else {
         panel.appendChild(deptView(name));
       }
@@ -222,17 +224,13 @@
     if (el) el.textContent = dept + ' 月額合計: ' + yen(deptTotal(dept));
   }
 
-  function summaryView() {
-    const div = document.createElement('div'); div.id = 'summary';
-    renderSummary(div);
+  // Allタブ：全メンバー一覧（全部署を一括表示・閲覧専用。編集は各部タブで）
+  function membersView() {
+    const div = document.createElement('div'); div.id = 'members';
+    renderMembers(div);
     return div;
   }
-  function refreshSummary() {
-    const div = document.getElementById('summary');
-    if (div) renderSummary(div);
-  }
-  function renderSummary(div) {
-    // メイン：全メンバー一覧（全部署を一括表示・閲覧専用。編集は各部タブで）
+  function renderMembers(div) {
     let total = 0;
     DATA.depts.forEach(dept => total += state[dept].length);
     let html = '<h2 class="sec">全メンバー（' + total + '名）</h2>';
@@ -253,10 +251,18 @@
       });
     });
     html += '</tbody></table>';
+    div.innerHTML = html;
+  }
 
-    // 補助：費用サマリー（部別・全社合計）
+  // 最後のタブ：費用サマリー（部別・全社合計）＋ GitHub突合の警告
+  function costView() {
+    const div = document.createElement('div'); div.id = 'cost';
+    renderCost(div);
+    return div;
+  }
+  function renderCost(div) {
     let grand = 0;
-    html += '<h2 class="sec">費用サマリー</h2>';
+    let html = '<h2 class="sec">費用サマリー</h2>';
     html += '<table class="summary"><thead><tr><th>部</th><th>付与数</th><th>月額</th></tr></thead><tbody>';
     DATA.depts.forEach(dept => {
       const t = deptTotal(dept); grand += t;
@@ -267,6 +273,12 @@
     html += '</tbody></table><p class="hint">※ 各部タブでの未保存の変更も即時反映されます</p>';
     html += warningsHtml();
     div.innerHTML = html;
+  }
+
+  // 各部タブで編集したら、Allのメンバー一覧と費用サマリーを再描画
+  function refreshSummary() {
+    const m = document.getElementById('members'); if (m) renderMembers(m);
+    const c = document.getElementById('cost'); if (c) renderCost(c);
   }
 
   function warningsHtml() {
