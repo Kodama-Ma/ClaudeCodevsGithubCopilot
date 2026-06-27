@@ -1,2 +1,6 @@
 # 集計の生成物（CIで都度生成・Pagesへデプロイするのでコミット不要）
 dist/
+
+# clasp のローカル設定（scriptId等。雛形は .clasp.json.example をコミット）
+gas/.clasp.json
+gas/.clasprc.json
