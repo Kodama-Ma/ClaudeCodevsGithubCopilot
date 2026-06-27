@@ -1,0 +1,24 @@
+name: Validate licenses CSV
+
+# licenses/ を変更するPRで、CSVの壊れ（列数ズレ・ヘッダー違い・ID重複・事業部混在）を検証する。
+# ブランチ保護でこのチェックを必須にすると、壊れたCSVはマージできなくなる。
+on:
+  pull_request:
+    paths:
+      - "licenses/**"
+      - "scripts/validate.py"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate CSV
+        run: python scripts/validate.py
