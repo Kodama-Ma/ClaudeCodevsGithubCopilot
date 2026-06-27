@@ -26,6 +26,11 @@
   .bar .total { font-size: 15px; font-weight: 700; }
   button.act { border: 1px solid #1f2328; background: #1f2328; color: #fff;
                padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .exportbar { text-align: right; margin-bottom: 10px; }
+  button.export { border: 1px solid #1a7f37; background: #1f883d; color: #fff;
+                  padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button.export:hover { background: #1a7f37; }
+  button.export:disabled { opacity: .6; cursor: default; }
   .msg { margin-left: auto; font-size: 13px; }
   .msg.ok { color: #1a7f37; } .msg.err { color: #cf222e; }
   .summary td.cost { font-weight: 700; }
@@ -102,8 +107,8 @@
     const tabs = document.createElement('div'); tabs.className = 'tabs';
     const panels = document.createElement('div');
 
-    const views = DATA.depts.slice();
-    if (DATA.isAdmin) views.push('💰 費用サマリ');
+    // 先頭は全体サマリーの「All」タブ、続いて各部のタブ
+    const views = ['All', ...DATA.depts];
 
     views.forEach((name, i) => {
       const btn = document.createElement('button');
@@ -119,14 +124,38 @@
       const panel = document.createElement('div');
       panel.className = 'panel' + (i === 0 ? ' active' : '');
       panel.id = 'panel-' + i;
-      if (name === '💰 費用サマリ') panel.appendChild(summaryView());
-      else panel.appendChild(deptView(name));
+      const scope = name === 'All' ? 'All' : name;
+      panel.appendChild(exportBar(scope));               // 各タブ右上に書き出しボタン
+      panel.appendChild(name === 'All' ? summaryView() : deptView(name));
       panels.appendChild(panel);
     });
 
     root.appendChild(tabs);
     root.appendChild(panels);
     DATA.depts.forEach(dept => updateTotal(dept));
+  }
+
+  function exportBar(scope) {
+    const bar = document.createElement('div'); bar.className = 'exportbar';
+    const b = document.createElement('button'); b.className = 'export';
+    b.textContent = '⬇ スプレッドシートに書き出し';
+    b.onclick = () => {
+      const label = scope === 'All' ? '全体' : scope;
+      if (!confirm(label + ' を、あなたのGoogleドライブにスプレッドシートとして書き出します。\nよろしいですか？')) return;
+      const old = b.textContent; b.disabled = true; b.textContent = '書き出し中…';
+      google.script.run
+        .withSuccessHandler(res => {
+          b.disabled = false; b.textContent = old;
+          window.open(res.url, '_blank');
+        })
+        .withFailureHandler(err => {
+          b.disabled = false; b.textContent = old;
+          alert('エラー: ' + err.message);
+        })
+        .exportToDrive(scope);
+    };
+    bar.appendChild(b);
+    return bar;
   }
 
   function deptView(dept) {
