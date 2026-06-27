@@ -42,6 +42,8 @@
   .warn code { background: #fff; border: 1px solid #eac54f; border-radius: 4px; padding: 1px 6px; }
   .ok-note { color: #1a7f37; font-size: 13px; margin-top: 16px; }
   .hint { color: #656d76; font-size: 12px; margin: 4px 0 0; }
+  .sec { font-size: 15px; margin: 22px 0 8px; }
+  .sec:first-child { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -124,9 +126,12 @@
       const panel = document.createElement('div');
       panel.className = 'panel' + (i === 0 ? ' active' : '');
       panel.id = 'panel-' + i;
-      const scope = name === 'All' ? 'All' : name;
-      panel.appendChild(exportBar(scope));               // 各タブ右上に書き出しボタン
-      panel.appendChild(name === 'All' ? summaryView() : deptView(name));
+      if (name === 'All') {
+        panel.appendChild(exportBar());                  // 書き出しボタンは Allタブだけ
+        panel.appendChild(summaryView());
+      } else {
+        panel.appendChild(deptView(name));
+      }
       panels.appendChild(panel);
     });
 
@@ -135,13 +140,12 @@
     DATA.depts.forEach(dept => updateTotal(dept));
   }
 
-  function exportBar(scope) {
+  function exportBar() {
     const bar = document.createElement('div'); bar.className = 'exportbar';
     const b = document.createElement('button'); b.className = 'export';
-    b.textContent = '⬇ スプレッドシートに書き出し';
+    b.textContent = '⬇ メンバー一覧をスプレッドシートに書き出して開く';
     b.onclick = () => {
-      const label = scope === 'All' ? '全体' : scope;
-      if (!confirm(label + ' を、あなたのGoogleドライブにスプレッドシートとして書き出します。\nよろしいですか？')) return;
+      if (!confirm('全社のメンバー一覧を、共有スプレッドシートに書き出して開きます。\nよろしいですか？')) return;
       const old = b.textContent; b.disabled = true; b.textContent = '書き出し中…';
       google.script.run
         .withSuccessHandler(res => {
@@ -152,7 +156,7 @@
           b.disabled = false; b.textContent = old;
           alert('エラー: ' + err.message);
         })
-        .exportToDrive(scope);
+        .exportAll();
     };
     bar.appendChild(b);
     return bar;
@@ -228,15 +232,39 @@
     if (div) renderSummary(div);
   }
   function renderSummary(div) {
+    // メイン：全メンバー一覧（全部署を一括表示・閲覧専用。編集は各部タブで）
+    let total = 0;
+    DATA.depts.forEach(dept => total += state[dept].length);
+    let html = '<h2 class="sec">全メンバー（' + total + '名）</h2>';
+    html += '<table><thead><tr>' +
+      ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン'].map(h => '<th>' + h + '</th>').join('') +
+      '</tr></thead><tbody>';
+    DATA.depts.forEach(dept => {
+      state[dept].forEach(r => {
+        const none = !r['ツール'] || r['ツール'] === '配布なし';
+        html += '<tr>' +
+          '<td class="ro">' + esc(r['github-id']) + '</td>' +
+          '<td class="ro">' + esc(r['部']) + '</td>' +
+          '<td class="ro">' + esc(r['グループ']) + '</td>' +
+          '<td class="ro">' + esc(r['氏名']) + '</td>' +
+          '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['ツール']) + '</td>' +
+          '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['プラン']) + '</td>' +
+          '</tr>';
+      });
+    });
+    html += '</tbody></table>';
+
+    // 補助：費用サマリー（部別・全社合計）
     let grand = 0;
-    let html = '<table class="summary"><thead><tr><th>部</th><th>付与数</th><th>月額</th></tr></thead><tbody>';
+    html += '<h2 class="sec">費用サマリー</h2>';
+    html += '<table class="summary"><thead><tr><th>部</th><th>付与数</th><th>月額</th></tr></thead><tbody>';
     DATA.depts.forEach(dept => {
       const t = deptTotal(dept); grand += t;
       const cnt = state[dept].filter(r => r['ツール'] && r['ツール'] !== '配布なし').length;
       html += '<tr><td>' + esc(dept) + '</td><td>' + cnt + '</td><td class="cost">' + yen(t) + '</td></tr>';
     });
     html += '<tr><td><b>全社合計</b></td><td></td><td class="cost"><b>' + yen(grand) + '</b></td></tr>';
-    html += '</tbody></table><p class="hint">※ 未保存の変更も即時反映されます</p>';
+    html += '</tbody></table><p class="hint">※ 各部タブでの未保存の変更も即時反映されます</p>';
     html += warningsHtml();
     div.innerHTML = html;
   }
