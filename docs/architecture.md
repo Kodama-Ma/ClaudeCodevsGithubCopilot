@@ -1,0 +1,99 @@
+# AIツール ライセンス管理 — 技術スタック / アーキテクチャ
+
+> 経過ドキュメント。設計判断の理由ごと残す。検討の流れは末尾の「決定の経緯」を参照。
+
+## 解きたい課題
+
+- 全社150名規模の AIツール（ClaudeCode / Codex 等）ライセンスとシートを管理したい
+- **事業部は5つ。各部長は自部署だけ編集**できるようにしたい
+- 全事業部を**集計した全体ビュー**も要る
+- 現状はスプレッドシートを共同編集 → 面倒
+  - スプシは「1ファイル1権限」なので、部署別に編集権限を分けるとファイルが5枚に割れ、集計シートとの同期がずれる
+- 申請・承認フローは不要（部長が直接編集する運用）
+- **無料・シンプル・データを外に出さない**ことを重視
+
+## 採用アーキテクチャ：GitHub リポジトリを台帳にする（単一リポジトリ）
+
+```
+ClaudeCodevsGithubCopilot/
+├ licenses/                  ← データの真実の置き場所（事業部ごとに分割）
+│  ├ dev1.csv  (開発1部)
+│  ├ dev2.csv  (開発2部)
+│  ├ dev3.csv  (開発3部)
+│  ├ dev4.csv  (開発4部)
+│  ├ dev5.csv  (開発5部)
+│  └ README.md
+├ .github/
+│  ├ CODEOWNERS              ← 「どのCSVを誰が承認できるか」= 権限の宣言
+│  └ workflows/aggregate.yml ← main更新で集計→Pagesへ自動デプロイ
+├ scripts/
+│  └ aggregate.py            ← 全CSVを集計し master.csv とダッシュボードHTMLを生成
+└ docs/
+   └ architecture.md         ← このファイル
+```
+
+### 技術スタック
+
+| レイヤ | 採用 | 理由 |
+|--------|------|------|
+| データストア | **CSV in Git（事業部ごと1ファイル）** | 外部DB不要。差分・履歴がそのまま監査ログになる |
+| 権限制御 | **CODEOWNERS + ブランチ保護** | 「自部署ファイルは自部長が承認」をGitHubの機能で宣言。自前コード0 |
+| 集計 | **Python 3.12 標準ライブラリのみ** | 依存ゼロ。CIで数十秒。`master.csv` と `index.html` を生成 |
+| 自動化 | **GitHub Actions** | public無料・private 2,000分/月。今回の規模なら無料枠で十分 |
+| ダッシュボード | **GitHub Pages（静的）** | 集計結果を事業部タブ切替で閲覧。サーバー不要 |
+| 認証 | **GitHubアカウント** | 全員がGithub-idを持つエンジニア組織なので自然 |
+
+### 権限はどこにあるか（重要）
+
+権限ロジックは **DB/アプリのコードではなく、GitHubの権限モデル（CODEOWNERS + ブランチ保護）** に置く。
+
+- `licenses/dev1.csv` を変更するPRは、`@dev1-lead` の承認が必須
+- 自部署ファイルだけなら**自分の承認だけでマージ可能**
+- 他部署ファイルを触るPRは、その部署の部長承認が要る → 越境を抑止
+- すべての変更が **git history = 監査ログ** として永続的に残る（誰がいつ付与/剥奪したか）
+
+### データフロー
+
+```
+部長が dev1.csv を編集してPR
+   └→ CODEOWNERSで @dev1-lead 承認 → mainにマージ
+        └→ Actions 起動（aggregate.py）
+             ├→ dist/master.csv   （全事業部集計）
+             └→ dist/index.html   （事業部タブ切替ダッシュボード）
+                  └→ GitHub Pages へデプロイ
+```
+
+## 強制の「硬さ」について
+
+- 単一リポジトリ + CODEOWNERS は **マージ時点で越境を弾く「ソフト強制」**。
+  他部署PRを*作る*ことは可能だが、その部署の部長承認なしには*マージできない*。
+- 「そもそも他部署を触らせない」ハード強制が要るなら、**事業部別リポジトリ**に分割する手もある。
+  ただしリポジトリ数が増えて集計セットアップが重くなるため、本構成は**単一リポジトリのソフト強制を採用**。
+- 実務上、ブランチ保護で Code Owners レビュー必須にすれば十分に機能する想定。
+
+## コストとプランの注意
+
+- GitHub Actions: **public無料 / private 2,000分・月**（本ジョブは1回数十秒）
+- GitHub Pages: 無料。ただし **Private Pages（社内限定公開）は Enterprise Cloud 限定**
+  - 現状（非Enterprise）では Pages は**公開**になる → **本番の実データを載せるのはNG**
+  - 本サンプルはダミーデータのため公開で問題なし
+  - 本番化時は Enterprise Cloud で Private Pages にするか、ダッシュボードをActions成果物に留める
+
+## セットアップ手順（リポジトリ管理者）
+
+1. このブランチをマージ後、`.github/CODEOWNERS` の `@devN-lead` を実際の部長ハンドルに置換
+2. Settings → Pages → Source を **GitHub Actions** に設定
+3. Settings → Branches → main にブランチ保護を追加し、
+   **Require a pull request before merging** と **Require review from Code Owners** を有効化
+4. 各部長を必要なら Collaborator に追加（write権限）
+5. 部長は自部署CSVを編集してPR → 承認 → 自動で集計・ダッシュボード更新
+
+## 決定の経緯
+
+1. **GAS + スプシ Webアプリ案** … 既存案。実行制限・UI・保守性で後々しんどい
+2. **Supabase + 静的フロント案** … RLSで行レベル権限を宣言でき技術的には良いが、
+   **従業員データを外部DBに置く**点がセキュリティ要件に引っかかる
+3. **GAS（clasp開発）案** … データがGoogle Workspace内に閉じる強みあり。clasp+gitで保守性も改善可
+4. **GitHub リポジトリ as DB 案（採用）** … 全員がエンジニア（Github-id保有）で、
+   Enterprise Private Pages なら漏洩リスクも解消。監査ログが自動で最強。権限を自前コードで書かない。
+   → 単一リポジトリ + CODEOWNERS で開始し、厳格さが足りなければ事業部別リポジトリへ移行する方針。
