@@ -23,8 +23,10 @@
   td.ro { color: #57606a; background: #fafbfc; }
   td.cost { text-align: right; font-variant-numeric: tabular-nums; }
   select { font: inherit; padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px; max-width: 160px; }
-  .bar { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
-  .bar .total { font-size: 15px; font-weight: 700; }
+  .bar { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+  .bar .total { font-size: 15px; font-weight: 700; border: 1px solid #d0d7de;
+                background: #fff; padding: 8px 14px; border-radius: 8px; }
+  .bar .act { margin-left: auto; }
   button.act { border: 1px solid var(--accent); background: var(--accent); color: #fff;
                padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button.act:hover { background: var(--accent-d); border-color: var(--accent-d); }
@@ -33,7 +35,7 @@
                   padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button.export:hover { background: #1a7f37; }
   button.export:disabled { opacity: .6; cursor: default; }
-  .msg { margin-left: auto; font-size: 13px; }
+  .msg { font-size: 13px; }
   .msg.ok { color: #1a7f37; } .msg.err { color: #cf222e; }
   .summary td.cost { font-weight: 700; }
   .loading, .error { padding: 40px; text-align: center; color: #656d76; }
@@ -50,11 +52,12 @@
   .forbidden .lock { font-size: 48px; }
   .forbidden h2 { margin: 12px 0 8px; color: #1f2328; }
   .forbidden .who { margin-top: 20px; font-size: 12px; color: #8c959f; }
+  .filtersection { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
   .filtertoggle { border: 1px solid #d0d7de; background: #fff; padding: 7px 16px;
-                  border-radius: 8px; cursor: pointer; font-size: 13px; margin-bottom: 10px; }
+                  border-radius: 8px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
   .filtertoggle.open { background: #eef2f5; border-color: #c2cad2; }
   .filterbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-               margin-bottom: 14px; padding: 12px 14px; background: #fff;
+               flex: 1; min-width: 0; padding: 12px 14px; background: #fff;
                border: 1px solid #e1e6eb; border-radius: 8px; }
   .filterbar input[type=search] { padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px;
                                   font: inherit; min-width: 200px; }
@@ -247,7 +250,7 @@
 
   // フィルタは「🔻 フィルタ」ボタンで開閉（初期は閉じる）
   function filterSection(scope) {
-    const sec = document.createElement('div');
+    const sec = document.createElement('div'); sec.className = 'filtersection';
     const toggle = document.createElement('button'); toggle.className = 'filtertoggle';
     toggle.innerHTML = '🔻 フィルタ';
     const bar = filterBar(scope);
@@ -387,10 +390,8 @@
     const bar = document.getElementById('bulk-' + dept);
     if (!bar) return;
     const sel = selected[dept] || new Set();
-    if (sel.size === 0) {
-      bar.innerHTML = '<span class="bulkhint">行の左のチェックで選ぶと、まとめてツール／プランを設定できます。</span>';
-      return;
-    }
+    if (sel.size === 0) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    bar.style.display = 'flex';
     bar.innerHTML =
       '<span class="bulkn">選択中 ' + sel.size + '名</span>' +
       '<select id="bulktool-' + esc(dept) + '"><option value="">ツール…</option>' + TOOLS.map(t => '<option value="' + esc(t) + '">' + (t || '(なし)') + '</option>').join('') + '</select>' +
