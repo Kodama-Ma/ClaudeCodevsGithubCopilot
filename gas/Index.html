@@ -44,6 +44,10 @@
   .hint { color: #656d76; font-size: 12px; margin: 4px 0 0; }
   .sec { font-size: 15px; margin: 22px 0 8px; }
   .sec:first-child { margin-top: 0; }
+  .forbidden { text-align: center; padding: 64px 24px; color: #57606a; }
+  .forbidden .lock { font-size: 48px; }
+  .forbidden h2 { margin: 12px 0 8px; color: #1f2328; }
+  .forbidden .who { margin-top: 20px; font-size: 12px; color: #8c959f; }
 </style>
 </head>
 <body>
@@ -70,6 +74,17 @@
   }
 
   function onData(d) {
+    if (d.forbidden) {
+      document.getElementById('meta').textContent = d.email || '';
+      const r = document.getElementById('root');
+      r.className = 'forbidden';
+      r.innerHTML =
+        '<div class="lock">🔒</div>' +
+        '<h2>アクセス権限がありません</h2>' +
+        '<p>このアプリを利用する権限が割り当てられていません。<br>必要な場合は管理者にご連絡ください。</p>' +
+        (d.email ? '<p class="who">' + esc(d.email) + '</p>' : '');
+      return;
+    }
     if (d.error) {
       document.getElementById('meta').textContent = d.email || '';
       onFail({ message: d.error });
