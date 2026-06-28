@@ -18,6 +18,7 @@ GAS（Google Apps Script）Webアプリ。clasp でローカル開発＋git管�
 - **GitHub Enterprise Cloud のCSV（`github_licenses` シート）と突合**し、
   登録漏れ・退職放置を管理者に警告表示
 - 権限はサーバー側で `Session.getActiveUser().getEmail()` を `roles` と照合
+  - **`roles` に載っていないユーザーには中身を一切返さず「権限なし」画面を表示**
   - 部長は自部のみ編集可。他部はそもそもアプリに出ない
   - 保存時に github-id の所属部を `Organization` で再検証してなりすましを防止
 - 変更は `log` シートに自動追記（簡易監査ログ）

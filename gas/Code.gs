@@ -116,11 +116,12 @@ function getMyContext_() {
   const email = Session.getActiveUser().getEmail();
   const roles = readSheet_(SHEETS.ROLES).rows;
   const mine = roles.filter(r => (r['メール'] || '').toLowerCase() === email.toLowerCase());
+  const authorized = mine.length > 0;            // roles にメールが載っている人だけ利用可
   const isAdmin = mine.some(r => (r['部'] || '').toUpperCase() === 'ALL');
   const allDepts = deptsInOrder_();
   const myDeptNames = mine.map(r => r['部']).filter(Boolean);
   const depts = isAdmin ? allDepts : allDepts.filter(d => myDeptNames.indexOf(d) !== -1);
-  return { email, isAdmin, depts };
+  return { email, authorized, isAdmin, depts };
 }
 
 /** 指定した部のメンバーを Organization 基準で join して返す（ライセンス未設定は配布なし） */
@@ -159,8 +160,12 @@ function getBootstrap() {
   if (!ctx.email) {
     return { error: 'ログインユーザーを取得できませんでした（ドメイン内アカウントでアクセスしてください）。' };
   }
+  // roles に載っていない人にはデータを一切返さない（権限なし画面を出す）
+  if (!ctx.authorized) {
+    return { forbidden: true, email: ctx.email };
+  }
   if (ctx.depts.length === 0) {
-    return { error: 'あなたの担当部が roles シートに登録されていません。管理者に連絡してください。', email: ctx.email };
+    return { error: 'あなたのアカウントには担当部が割り当てられていません。管理者に連絡してください。', email: ctx.email };
   }
 
   const result = {
