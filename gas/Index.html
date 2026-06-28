@@ -48,6 +48,20 @@
   .forbidden .lock { font-size: 48px; }
   .forbidden h2 { margin: 12px 0 8px; color: #1f2328; }
   .forbidden .who { margin-top: 20px; font-size: 12px; color: #8c959f; }
+  .filterbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .filterbar input[type=search] { padding: 5px 8px; border: 1px solid #d0d7de; border-radius: 6px;
+                                  font: inherit; min-width: 180px; }
+  .filterbar select { font: inherit; padding: 4px 6px; border: 1px solid #d0d7de; border-radius: 6px; }
+  .filterbar .chk { font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .filterbar .count { font-size: 12px; color: #656d76; margin-left: auto; }
+  .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 22px;
+             margin-bottom: 10px; padding: 7px 12px; background: #eef2f5; border-radius: 8px; }
+  .bulkbar .bulkhint { font-size: 12px; color: #656d76; }
+  .bulkbar .bulkn { font-size: 13px; font-weight: 700; }
+  .bulkbar select { font: inherit; padding: 4px 6px; border: 1px solid #d0d7de; border-radius: 6px; }
+  button.ghost { border: 1px solid #d0d7de; background: #fff; padding: 6px 12px;
+                 border-radius: 8px; cursor: pointer; font-size: 13px; }
+  th.cbcol, td.cbcol { width: 34px; text-align: center; padding: 4px; }
 </style>
 </head>
 <body>
@@ -65,6 +79,8 @@
   let TOOLS = [];
   let PLANS = [];
   const state = {};       // dept -> rows[]
+  const filters = {};     // 'All' or dept -> フィルタ条件
+  const selected = {};    // dept -> Set(github-id) 一括操作の選択
 
   google.script.run.withSuccessHandler(onData).withFailureHandler(onFail).getBootstrap();
 
@@ -154,7 +170,79 @@
 
     root.appendChild(tabs);
     root.appendChild(panels);
-    DATA.depts.forEach(dept => updateTotal(dept));
+    // DOM挿入後に再描画して、件数表示・一括バーを確定させる
+    renderMembers(document.getElementById('members'));
+    DATA.depts.forEach(dept => {
+      renderTable(document.getElementById('tbl-' + dept), dept);
+      updateTotal(dept);
+    });
+  }
+
+  function uniq(arr) { return [...new Set(arr)]; }
+
+  function ensureFilter(key) {
+    if (!filters[key]) filters[key] = { kw: '', dept: '', group: '', tool: '', plan: '', noneOnly: false };
+    return filters[key];
+  }
+
+  // 1行がフィルタ条件を通過するか（kw=氏名/ID/グループの部分一致、各select=完全一致）
+  function passFilter(row, f) {
+    if (f.kw) {
+      const hay = ((row['github-id'] || '') + ' ' + (row['氏名'] || '') + ' ' + (row['グループ'] || '')).toLowerCase();
+      if (hay.indexOf(f.kw.toLowerCase().trim()) === -1) return false;
+    }
+    if (f.dept && row['部'] !== f.dept) return false;
+    if (f.group && row['グループ'] !== f.group) return false;
+    if (f.tool && row['ツール'] !== f.tool) return false;
+    if (f.plan && row['プラン'] !== f.plan) return false;
+    if (f.noneOnly && row['ツール'] && row['ツール'] !== '配布なし') return false;
+    return true;
+  }
+
+  function selFilter(label, values, current, onchange) {
+    const s = document.createElement('select');
+    s.innerHTML = '<option value="">' + label + ': すべて</option>' +
+      values.map(v => '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(v) + '</option>').join('');
+    s.onchange = () => onchange(s.value);
+    return s;
+  }
+
+  // フィルタバー（All=部で絞る／各部タブ=グループで絞る）
+  function filterBar(scope) {
+    const isAll = scope === 'All';
+    const f = ensureFilter(scope);
+    const bar = document.createElement('div'); bar.className = 'filterbar';
+
+    const kw = document.createElement('input');
+    kw.type = 'search';
+    kw.placeholder = '🔍 氏名 / github-id' + (isAll ? ' / グループ' : ' / グループ');
+    kw.value = f.kw;
+    kw.oninput = () => { f.kw = kw.value; refilter(scope); };
+    bar.appendChild(kw);
+
+    if (isAll) {
+      bar.appendChild(selFilter('部', DATA.allDepts, f.dept, v => { f.dept = v; refilter(scope); }));
+    } else {
+      const groups = uniq(state[scope].map(r => r['グループ']).filter(Boolean));
+      bar.appendChild(selFilter('グループ', groups, f.group, v => { f.group = v; refilter(scope); }));
+    }
+    bar.appendChild(selFilter('ツール', TOOLS.filter(t => t !== '配布なし'), f.tool, v => { f.tool = v; refilter(scope); }));
+    bar.appendChild(selFilter('プラン', PLANS.filter(Boolean), f.plan, v => { f.plan = v; refilter(scope); }));
+
+    const lbl = document.createElement('label'); lbl.className = 'chk';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.noneOnly;
+    cb.onchange = () => { f.noneOnly = cb.checked; refilter(scope); };
+    lbl.appendChild(cb); lbl.appendChild(document.createTextNode(' 配布なしのみ'));
+    bar.appendChild(lbl);
+
+    const count = document.createElement('span'); count.className = 'count'; count.id = 'count-' + scope;
+    bar.appendChild(count);
+    return bar;
+  }
+
+  function refilter(scope) {
+    if (scope === 'All') renderMembers(document.getElementById('members'));
+    else renderTable(document.getElementById('tbl-' + scope), scope);
   }
 
   function exportBar() {
@@ -181,6 +269,11 @@
 
   function deptView(dept) {
     const wrap = document.createElement('div');
+    wrap.appendChild(filterBar(dept));
+
+    const bulk = document.createElement('div'); bulk.className = 'bulkbar'; bulk.id = 'bulk-' + dept;
+    wrap.appendChild(bulk);
+
     const table = document.createElement('table');
     table.id = 'tbl-' + dept;
     renderTable(table, dept);
@@ -202,15 +295,22 @@
   }
 
   function renderTable(table, dept) {
+    if (!table) return;
+    const f = ensureFilter(dept);
     const rows = state[dept];
+    const sel = selected[dept] || (selected[dept] = new Set());
+
     let html = '<thead><tr>' +
+      '<th class="cbcol"><input type="checkbox" id="selall-' + esc(dept) + '"></th>' +
       ['github-id', 'グループ', '氏名', 'ツール', 'プラン', '月額'].map(h => '<th>' + h + '</th>').join('') +
       '</tr></thead><tbody>';
-    if (rows.length === 0) {
-      html += '<tr><td colspan="6" class="ro">この部のメンバーが Organization シートにいません。</td></tr>';
-    }
+    let shown = 0;
     rows.forEach((r, idx) => {
+      if (!passFilter(r, f)) return;
+      shown++;
+      const checked = sel.has(r['github-id']) ? ' checked' : '';
       html += '<tr>' +
+        '<td class="cbcol"><input type="checkbox" class="rowcb" data-d="' + esc(dept) + '" data-id="' + esc(r['github-id']) + '"' + checked + '></td>' +
         '<td class="ro">' + esc(r['github-id']) + '</td>' +
         '<td class="ro">' + esc(r['グループ']) + '</td>' +
         '<td class="ro">' + esc(r['氏名']) + '</td>' +
@@ -219,16 +319,81 @@
         '<td class="cost" id="cost-' + esc(dept) + '-' + idx + '">' + yen(costOf(r)) + '</td>' +
         '</tr>';
     });
+    if (rows.length === 0) {
+      html += '<tr><td colspan="7" class="ro">この部のメンバーが Organization シートにいません。</td></tr>';
+    } else if (shown === 0) {
+      html += '<tr><td colspan="7" class="ro">該当するメンバーがいません。</td></tr>';
+    }
     html += '</tbody>';
     table.innerHTML = html;
     table.querySelectorAll('select').forEach(el => el.addEventListener('change', onEdit));
+    table.querySelectorAll('.rowcb').forEach(el => el.addEventListener('change', onRowCheck));
+    const selall = document.getElementById('selall-' + dept);
+    if (selall) selall.addEventListener('change', () => onSelectAll(dept, selall.checked));
+
+    const c = document.getElementById('count-' + dept);
+    if (c) c.textContent = '該当 ' + shown + ' / ' + rows.length + ' 名';
+    updateBulkBar(dept);
   }
 
   function onEdit(e) {
     const el = e.target;
     const dept = el.dataset.d, i = Number(el.dataset.i), k = el.dataset.k;
     state[dept][i][k] = el.value;
+    if (k === 'ツール' && el.value === '配布なし') state[dept][i]['プラン'] = '';
     document.getElementById('cost-' + dept + '-' + i).textContent = yen(costOf(state[dept][i]));
+    updateTotal(dept);
+    refreshSummary();
+  }
+
+  // ===== 一括操作（各部タブ）=====
+  function onRowCheck(e) {
+    const el = e.target, dept = el.dataset.d, id = el.dataset.id;
+    const sel = selected[dept] || (selected[dept] = new Set());
+    if (el.checked) sel.add(id); else sel.delete(id);
+    updateBulkBar(dept);
+  }
+  function onSelectAll(dept, checked) {
+    const f = ensureFilter(dept);
+    const sel = selected[dept] || (selected[dept] = new Set());
+    state[dept].forEach(r => {
+      if (passFilter(r, f)) { if (checked) sel.add(r['github-id']); else sel.delete(r['github-id']); }
+    });
+    renderTable(document.getElementById('tbl-' + dept), dept);
+  }
+  function updateBulkBar(dept) {
+    const bar = document.getElementById('bulk-' + dept);
+    if (!bar) return;
+    const sel = selected[dept] || new Set();
+    if (sel.size === 0) {
+      bar.innerHTML = '<span class="bulkhint">行の左のチェックで選ぶと、まとめてツール／プランを設定できます。</span>';
+      return;
+    }
+    bar.innerHTML =
+      '<span class="bulkn">選択中 ' + sel.size + '名</span>' +
+      '<select id="bulktool-' + esc(dept) + '"><option value="">ツール…</option>' + TOOLS.map(t => '<option value="' + esc(t) + '">' + (t || '(なし)') + '</option>').join('') + '</select>' +
+      '<select id="bulkplan-' + esc(dept) + '"><option value="">プラン…</option>' + PLANS.filter(Boolean).map(p => '<option value="' + esc(p) + '">' + esc(p) + '</option>').join('') + '</select>' +
+      '<button class="act" id="bulkapply-' + esc(dept) + '">一括適用</button>' +
+      '<button class="ghost" id="bulkclear-' + esc(dept) + '">選択解除</button>';
+    document.getElementById('bulkapply-' + dept).onclick = () => applyBulk(dept);
+    document.getElementById('bulkclear-' + dept).onclick = () => {
+      selected[dept].clear();
+      renderTable(document.getElementById('tbl-' + dept), dept);
+    };
+  }
+  function applyBulk(dept) {
+    const sel = selected[dept];
+    if (!sel || sel.size === 0) return;
+    const tool = document.getElementById('bulktool-' + dept).value;
+    if (!tool) { alert('ツールを選んでください（「配布なし」を選べば一括で剥奪できます）。'); return; }
+    const plan = document.getElementById('bulkplan-' + dept).value;
+    state[dept].forEach(r => {
+      if (sel.has(r['github-id'])) {
+        r['ツール'] = tool;
+        r['プラン'] = (tool === '配布なし') ? '' : plan;
+      }
+    });
+    renderTable(document.getElementById('tbl-' + dept), dept);
     updateTotal(dept);
     refreshSummary();
   }
@@ -241,36 +406,47 @@
 
   // Allタブ：全メンバー一覧（全部署を一括表示・閲覧専用。編集は各部タブで）
   function membersView() {
+    const wrap = document.createElement('div');
+    wrap.appendChild(filterBar('All'));
     const div = document.createElement('div'); div.id = 'members';
     renderMembers(div);
-    return div;
+    wrap.appendChild(div);
+    return wrap;
   }
   function renderMembers(div) {
-    // 自分が編集中の値（担当部のみ）を github-id で引けるように
+    if (!div) return;
+    // 自分が編集中の値（担当部のみ）を github-id で引けるように、現在値で組み立て
     const edited = {};
     DATA.depts.forEach(dept => state[dept].forEach(r => edited[r['github-id']] = r));
+    const all = DATA.allPeople.map(r => {
+      const e = edited[r['github-id']];
+      return e ? Object.assign({}, r, { 'ツール': e['ツール'], 'プラン': e['プラン'] }) : r;
+    });
 
-    const list = DATA.allPeople;     // 全社メンバー（権限に関わらず閲覧）
-    let html = '<h2 class="sec">全メンバー（' + list.length + '名）</h2>';
-    html += '<table><thead><tr>' +
+    const f = ensureFilter('All');
+    const list = all.filter(r => passFilter(r, f));
+
+    let html = '<table><thead><tr>' +
       ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン'].map(h => '<th>' + h + '</th>').join('') +
       '</tr></thead><tbody>';
+    if (list.length === 0) {
+      html += '<tr><td colspan="6" class="ro">該当するメンバーがいません。</td></tr>';
+    }
     list.forEach(r => {
-      const e = edited[r['github-id']];                 // 自部なら編集中の値を優先表示
-      const tool = e ? e['ツール'] : r['ツール'];
-      const plan = e ? e['プラン'] : r['プラン'];
-      const none = !tool || tool === '配布なし';
+      const none = !r['ツール'] || r['ツール'] === '配布なし';
       html += '<tr>' +
         '<td class="ro">' + esc(r['github-id']) + '</td>' +
         '<td class="ro">' + esc(r['部']) + '</td>' +
         '<td class="ro">' + esc(r['グループ']) + '</td>' +
         '<td class="ro">' + esc(r['氏名']) + '</td>' +
-        '<td' + (none ? ' class="ro"' : '') + '>' + esc(tool) + '</td>' +
-        '<td' + (none ? ' class="ro"' : '') + '>' + esc(plan) + '</td>' +
+        '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['ツール']) + '</td>' +
+        '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['プラン']) + '</td>' +
         '</tr>';
     });
     html += '</tbody></table>';
     div.innerHTML = html;
+    const c = document.getElementById('count-All');
+    if (c) c.textContent = '該当 ' + list.length + ' / ' + all.length + ' 名';
   }
 
   // 最後のタブ：費用サマリー（部別・全社合計）＋ GitHub突合の警告
