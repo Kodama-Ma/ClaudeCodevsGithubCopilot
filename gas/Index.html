@@ -30,7 +30,7 @@
   button.act { border: 1px solid var(--accent); background: var(--accent); color: #fff;
                padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button.act:hover { background: var(--accent-d); border-color: var(--accent-d); }
-  .exportbar { text-align: right; margin-bottom: 10px; }
+  .exportbar { text-align: right; margin: 16px 0; }
   button.export { border: 1px solid #1a7f37; background: #1f883d; color: #fff;
                   padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button.export:hover { background: #1a7f37; }
@@ -166,8 +166,8 @@
       panel.className = 'panel' + (i === 0 ? ' active' : '');
       panel.id = 'panel-' + i;
       if (name === 'All') {
-        panel.appendChild(exportBar());                  // 書き出しボタンは Allタブだけ
         panel.appendChild(membersView());
+        panel.appendChild(exportBar());                  // 各部タブの保存ボタンと同じ下部・右寄せ
       } else if (name === '費用サマリー') {
         panel.appendChild(costView());
       } else {
