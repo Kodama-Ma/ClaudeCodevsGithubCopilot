@@ -172,7 +172,9 @@ function getBootstrap() {
     email: ctx.email,
     isAdmin: ctx.isAdmin,
     depts: ctx.depts,
-    people: buildPeople_(ctx.depts),
+    people: buildPeople_(ctx.depts),            // 編集用：自分の担当部だけ
+    allPeople: buildPeople_(deptsInOrder_()),   // Allタブ用：全社（閲覧専用）
+    allDepts: deptsInOrder_(),                  // 全社の部一覧（表示順）
     prices: readSheet_(SHEETS.PRICES).rows
   };
 
@@ -189,8 +191,8 @@ function getBootstrap() {
  */
 function exportAll() {
   const ctx = getMyContext_();
-  const depts = ctx.depts;
-  if (!depts || depts.length === 0) throw new Error('出力できる部がありません。');
+  if (!ctx.authorized) throw new Error('権限がありません。');
+  const depts = deptsInOrder_();   // Allタブと同じく全社メンバーを書き出す
 
   const people = buildPeople_(depts);
   const headers = ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン'];

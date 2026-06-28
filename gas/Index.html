@@ -246,24 +246,28 @@
     return div;
   }
   function renderMembers(div) {
-    let total = 0;
-    DATA.depts.forEach(dept => total += state[dept].length);
-    let html = '<h2 class="sec">全メンバー（' + total + '名）</h2>';
+    // 自分が編集中の値（担当部のみ）を github-id で引けるように
+    const edited = {};
+    DATA.depts.forEach(dept => state[dept].forEach(r => edited[r['github-id']] = r));
+
+    const list = DATA.allPeople;     // 全社メンバー（権限に関わらず閲覧）
+    let html = '<h2 class="sec">全メンバー（' + list.length + '名）</h2>';
     html += '<table><thead><tr>' +
       ['github-id', '部', 'グループ', '氏名', 'ツール', 'プラン'].map(h => '<th>' + h + '</th>').join('') +
       '</tr></thead><tbody>';
-    DATA.depts.forEach(dept => {
-      state[dept].forEach(r => {
-        const none = !r['ツール'] || r['ツール'] === '配布なし';
-        html += '<tr>' +
-          '<td class="ro">' + esc(r['github-id']) + '</td>' +
-          '<td class="ro">' + esc(r['部']) + '</td>' +
-          '<td class="ro">' + esc(r['グループ']) + '</td>' +
-          '<td class="ro">' + esc(r['氏名']) + '</td>' +
-          '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['ツール']) + '</td>' +
-          '<td' + (none ? ' class="ro"' : '') + '>' + esc(r['プラン']) + '</td>' +
-          '</tr>';
-      });
+    list.forEach(r => {
+      const e = edited[r['github-id']];                 // 自部なら編集中の値を優先表示
+      const tool = e ? e['ツール'] : r['ツール'];
+      const plan = e ? e['プラン'] : r['プラン'];
+      const none = !tool || tool === '配布なし';
+      html += '<tr>' +
+        '<td class="ro">' + esc(r['github-id']) + '</td>' +
+        '<td class="ro">' + esc(r['部']) + '</td>' +
+        '<td class="ro">' + esc(r['グループ']) + '</td>' +
+        '<td class="ro">' + esc(r['氏名']) + '</td>' +
+        '<td' + (none ? ' class="ro"' : '') + '>' + esc(tool) + '</td>' +
+        '<td' + (none ? ' class="ro"' : '') + '>' + esc(plan) + '</td>' +
+        '</tr>';
     });
     html += '</tbody></table>';
     div.innerHTML = html;
@@ -284,8 +288,10 @@
       const cnt = state[dept].filter(r => r['ツール'] && r['ツール'] !== '配布なし').length;
       html += '<tr><td>' + esc(dept) + '</td><td>' + cnt + '</td><td class="cost">' + yen(t) + '</td></tr>';
     });
-    html += '<tr><td><b>全社合計</b></td><td></td><td class="cost"><b>' + yen(grand) + '</b></td></tr>';
-    html += '</tbody></table><p class="hint">※ 各部タブでの未保存の変更も即時反映されます</p>';
+    const totalLabel = DATA.isAdmin ? '全社合計' : '合計';
+    html += '<tr><td><b>' + totalLabel + '</b></td><td></td><td class="cost"><b>' + yen(grand) + '</b></td></tr>';
+    html += '</tbody></table><p class="hint">※ 各部タブでの未保存の変更も即時反映されます'
+      + (DATA.isAdmin ? '' : '（費用は担当部のみ表示）') + '</p>';
     html += warningsHtml();
     div.innerHTML = html;
   }
