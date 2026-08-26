@@ -70,12 +70,21 @@
   button.ghost { border: 1px solid #d0d7de; background: #fff; padding: 6px 12px;
                  border-radius: 8px; cursor: pointer; font-size: 13px; }
   th.cbcol, td.cbcol { width: 34px; text-align: center; padding: 4px; }
+  .lookup { margin-top: 8px; position: relative; }
+  .lookup input { padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 8px; font-size: 13px; width: 240px; }
+  #lookup-result { margin-top: 6px; font-size: 13px; }
+  #lookup-result .hit { border: 1px solid #d0d7de; border-radius: 8px; padding: 8px 10px; background: #fff; }
+  #lookup-result .hit ul { margin: 6px 0 0; padding-left: 18px; color: #57606a; }
 </style>
 </head>
 <body>
 <header>
   <h1>AIツール ライセンス管理</h1>
   <div class="meta" id="meta">読み込み中…</div>
+  <div class="lookup">
+    <input id="lookup-input" type="text" placeholder="github-id で検索…" autocomplete="off">
+    <div id="lookup-result"></div>
+  </div>
 </header>
 <main>
   <div id="root" class="loading">データを読み込んでいます…</div>
@@ -91,6 +100,24 @@
   const selected = {};    // dept -> Set(github-id) 一括操作の選択
 
   google.script.run.withSuccessHandler(onData).withFailureHandler(onFail).getBootstrap();
+
+  document.getElementById('lookup-input').addEventListener('keyup', function (e) {
+    const q = e.target.value.trim();
+    const box = document.getElementById('lookup-result');
+    if (!q) { box.innerHTML = ''; return; }
+    google.script.run.withSuccessHandler(renderLookup).findPerson(q);
+  });
+
+  function renderLookup(res) {
+    const box = document.getElementById('lookup-result');
+    if (!res || !res.found) { box.innerHTML = '<div class="hit">該当なし</div>'; return; }
+    let html = '<div class="hit"><b>' + res['氏名'] + '</b> (' + res['github-id'] + ')<br>' +
+      res['部'] + ' / ' + res['グループ'] + ' — ' + res['ツール'] + ' ' + res['プラン'];
+    if (res.logs && res.logs.length) {
+      html += '<ul>' + res.logs.map(l => '<li>' + l['日時'] + ' ' + l['内容'] + '</li>').join('') + '</ul>';
+    }
+    box.innerHTML = html + '</div>';
+  }
 
   function onFail(err) {
     const r = document.getElementById('root');

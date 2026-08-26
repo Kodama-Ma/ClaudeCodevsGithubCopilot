@@ -18,6 +18,10 @@ GAS（Google Apps Script）Webアプリ。clasp でローカル開発＋git管�
 - **一括操作**（各部タブ）: 行頭チェックで選択 → まとめてツール/プランを適用（全選択はフィルタ結果に連動。「配布なし」で一括剥奪）
 - github-id・氏名・グループは **read-only表示**（`Organization` で一元管理。二重管理しない）
 - 管理者は **費用サマリ**タブで部別・全社合計の月額を一覧
+- **個人検索**: ヘッダーの検索ボックスに github-id を入れると、所属・付与ツール・直近の操作履歴を表示
+  （`roles` に載っているユーザーのみ利用可。権限のない人には結果を返さない）
+- **部間コピー**: `copyDeptLicenses(fromDept, toDept)` で、ある部の代表的なツール/プランを
+  別の部のメンバー全員に一括付与（コピー元・コピー先の**両方が自分の担当部である場合のみ**実行可能）
 - **GitHub Enterprise Cloud のCSV（`github_licenses` シート）と突合**し、
   登録漏れ・退職放置を管理者に警告表示
 - 権限はサーバー側で `Session.getActiveUser().getEmail()` を `roles` と照合
