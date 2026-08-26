@@ -368,3 +368,97 @@ function initSheets() {
 
   console.log('initSheets 完了。Organization / roles / prices / github_licenses を実データに置き換えてください。');
 }
+
+/**
+ * github-id で個人のライセンス状況と操作履歴を照会する。
+ * 画面ヘッダーの検索ボックスから google.script.run で呼ばれる。
+ */
+function findPerson(githubId) {
+  const id = String(githubId || '').trim();
+  if (!id) return { found: false };
+
+  const org = orgById_();
+  const person = org[id];
+  if (!person) return { found: false, id: id };
+
+  const lic = readSheet_(SHEETS.LICENSES).rows.filter(r => r['github-id'] === id)[0] || {};
+  const logs = readSheet_(SHEETS.LOG).rows
+    .filter(r => String(r['内容']).indexOf(id) !== -1)
+    .slice(-10);
+
+  return {
+    found: true,
+    'github-id': id,
+    '部': person['部'],
+    'グループ': person['グループ'],
+    '氏名': person['氏名'],
+    'ツール': lic['ツール'] || NO_TOOL,
+    'プラン': lic['プラン'] || '',
+    logs: logs
+  };
+}
+
+/**
+ * ある部のライセンス構成を別の部にそのままコピーする。
+ * 同じツール・プランを部ごと一括で配りたいときの運用ショートカット。
+ * コピー元の人数ぶんではなく、コピー先メンバー全員に同じツール・プランを付与する。
+ */
+function copyDeptLicenses(fromDept, toDept) {
+  const ctx = getMyContext_();
+  if (ctx.depts.indexOf(fromDept) === -1) {
+    throw new Error('権限がありません: ' + fromDept + ' を参照できるのは担当者のみです。');
+  }
+
+  const org = orgById_();
+  const fromIds = Object.keys(org).filter(id => org[id]['部'] === fromDept);
+  const toIds = Object.keys(org).filter(id => org[id]['部'] === toDept);
+  if (toIds.length === 0) throw new Error('コピー先にメンバーがいません: ' + toDept);
+
+  // コピー元で一番多く使われているツール・プランを代表値として採用する
+  const licRows = readSheet_(SHEETS.LICENSES).rows;
+  const count = {};
+  licRows.filter(r => fromIds.indexOf(r['github-id']) !== -1).forEach(r => {
+    const key = r['ツール'] + '||' + r['プラン'];
+    count[key] = (count[key] || 0) + 1;
+  });
+  const top = Object.keys(count).sort((a, b) => count[b] - count[a])[0];
+  if (!top) throw new Error('コピー元にライセンスが登録されていません: ' + fromDept);
+  const [tool, plan] = top.split('||');
+
+  const incoming = toIds.map(id => ({ 'github-id': id, 'ツール': tool, 'プラン': plan }));
+  const others = licRows.filter(r => toIds.indexOf(r['github-id']) === -1);
+  const merged = others.concat(incoming);
+
+  const sh = getSpreadsheet_().getSheetByName(SHEETS.LICENSES);
+  const out = [LICENSE_HEADERS].concat(merged.map(r => LICENSE_HEADERS.map(h => r[h] || '')));
+  sh.clearContents();
+  sh.getRange(1, 1, out.length, LICENSE_HEADERS.length).setValues(out);
+
+  appendLog_(ctx.email, toDept, fromDept + ' の構成を ' + toDept + ' にコピー（' + tool + '/' + plan + ' を ' + incoming.length + ' 名）');
+  return { ok: true, tool: tool, plan: plan, count: incoming.length };
+}
+
+/**
+ * 部ごとの月額合計を返す（費用タブのサマリー用）。
+ * Organization を基準に、1人ずつ licenses と prices を引いて積み上げる。
+ */
+function deptMonthlyTotals() {
+  const ss = getSpreadsheet_();
+  const totals = {};
+
+  readSheet_(SHEETS.ORG).rows.forEach(o => {
+    const licValues = ss.getSheetByName(SHEETS.LICENSES).getDataRange().getValues();
+    const priceValues = ss.getSheetByName(SHEETS.PRICES).getDataRange().getValues();
+
+    const licRow = licValues.slice(1).filter(r => String(r[0]).trim() === o['github-id'])[0];
+    if (!licRow) return;
+
+    const priceRow = priceValues.slice(1)
+      .filter(r => String(r[0]).trim() === String(licRow[1]).trim() && String(r[1]).trim() === String(licRow[2]).trim())[0];
+
+    const yen = Number(priceRow && priceRow[2]);
+    totals[o['部']] = (totals[o['部']] || 0) + yen;
+  });
+
+  return totals;
+}
