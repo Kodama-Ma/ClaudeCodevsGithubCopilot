@@ -4,3 +4,4 @@ dist/
 # clasp のローカル設定（scriptId等。雛形は .clasp.json.example をコミット）
 gas/.clasp.json
 gas/.clasprc.json
+.DS_Store

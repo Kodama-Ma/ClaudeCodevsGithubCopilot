@@ -1,0 +1,51 @@
+# CodeRabbit 設定  https://docs.coderabbit.ai/getting-started/configure-coderabbit
+language: "ja-JP"
+
+tone_instructions: >
+  日本語で、簡潔かつ具体的にレビューしてください。
+  指摘は「何が問題か」「どう直すか」をセットで書き、根拠のない推測は避けてください。
+
+reviews:
+  # 試験期間中は指摘を多めに出す。落ち着かせたい場合は chill に変更。
+  profile: "assertive"
+  # レビュー結果で PR をブロックしない（試験なので）
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+  poem: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+
+  # レビュー対象外（バイナリ・生成物・サンプルデータ）
+  path_filters:
+    - "!**/*.pdf"
+    - "!**/*.pptx"
+    - "!slides.html"
+    - "!seeds/**"
+    - "!licenses/**"
+
+  path_instructions:
+    - path: "gas/**"
+      instructions: >
+        Google Apps Script (V8) のコードです。以下を重点的に確認してください。
+        - SpreadsheetApp の getRange/getValues をループ内で呼ぶなど、
+          クォータや実行時間を圧迫するシートアクセスのパターン
+        - google.script.run 経由で外部入力が渡る関数での入力検証の欠如
+        - roles シートによる権限チェックの抜け漏れ（管理者判定のバイパス）
+        - Index.html のクライアント側で innerHTML に未エスケープの値を差し込む XSS
+    - path: "scripts/**"
+      instructions: >
+        Python スクリプトです。CSV パース時の例外処理、エンコーディング、
+        ファイルパスの扱いを重点的に確認してください。
+    - path: "**/*.md"
+      instructions: >
+        ドキュメントです。誤字脱字や表記ゆれの細かい指摘は不要です。
+        手順の矛盾や、コードと実際に食い違っている記述のみ指摘してください。
+
+chat:
+  auto_reply: true
